@@ -292,7 +292,7 @@ static void hysteresis() {
 #endif
 
 int main() {
-  std::setvbuf(stdout, nullptr, _IOLBF, 0);
+  std::setvbuf(stdout, nullptr, _IONBF, 0);
   healthy();
 #if defined(F7_REQUIRED)
   requiredFlaps();

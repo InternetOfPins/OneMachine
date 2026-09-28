@@ -531,7 +531,7 @@ static void scenarioListing() {
 }
 
 int main() {
-  std::setvbuf(stdout, nullptr, _IOLBF, 0);      // a mutation that crashes still shows the checks it failed first
+  std::setvbuf(stdout, nullptr, _IONBF, 0);      // a mutation that crashes still shows the checks it failed first
   scenarioDefault();
   scenarioPin();
   scenarioDecoy();
