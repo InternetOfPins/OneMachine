@@ -41,10 +41,15 @@ namespace rosCompose {
   using LocalFanout = typename Chain<Subs...>::template Part<PubCap<Msg>>;
 
   /// The causal-boundary transport seam. The one irreducible indirect hop.
+  /// Never owned polymorphically — capabilities are static objects, never
+  /// allocated or freed — so the destructor is protected and non-virtual:
+  /// deleting through a Cap* is a compile error, not just unused, and no
+  /// deleting destructor (and so no operator delete) is ever emitted.
   template<typename Msg>
   struct Cap {
     virtual void deliver(const Msg& m) = 0;
-    virtual ~Cap() = default;
+  protected:
+    ~Cap() = default;
   };
 
   /// Chain terminal that forwards to a transport `Cap` if one is linked.
