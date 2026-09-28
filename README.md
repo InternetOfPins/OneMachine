@@ -100,6 +100,18 @@ A driver opts a row in to isolation with `static constexpr bool mayIsolate = tru
 (cut its own supply, disable its channel — whatever "off" means for that device); `static constexpr bool required = true;`
 means it is never quarantined or disconnected, only escalated. Neither declaration costs anything when absent.
 
+## Examples
+
+Four stages, each adding one thing to the last, all built around one real sensor (a GY-521/MPU6050 on a Nano):
+
+- [`examples/discover`](examples/discover) — find the device by its own identity, print the table.
+- [`examples/mpu6050`](examples/mpu6050) — read its real capabilities, print them as they arrive.
+- [`examples/recover`](examples/recover) — a failure edge: transient faults retried, re-probed, re-initialised.
+- [`examples/health`](examples/health) — a health monitor: quarantine on flapping, disconnect on real trouble.
+
+`test/examples/build.sh` builds all four for the Nano on every change, so they can't silently rot as the library
+evolves.
+
 ## Status
 
 Proven on real hardware (an ATmega328P, a real I2C bus, a real sensor and a real display): discovery, the failure
@@ -107,9 +119,6 @@ edges' recover/reprobe/re-init paths, and the health monitor's report → quaran
 device it disconnected coming back through recovery on its own. Native and AVR builds are both part of every check
 this library carries forward from its own development (mutation-tested, checksum-verified against a simulated
 ATmega328 where the round called for it).
-
-**Examples are not written yet** — this is the library material as it moved out of its own development history;
-worked examples (a real I2C sensor, a health-monitored bus) are the next thing this repository gets.
 
 ## License
 
