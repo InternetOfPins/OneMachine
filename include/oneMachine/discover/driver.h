@@ -40,9 +40,7 @@ namespace discover {
   // is the row's read(row) called by pump()? By default when the driver produces something; `static constexpr bool polled` says otherwise
   // (a display produces nothing and is refreshed).
   template<typename D, typename = void> struct PolledOf : std::bool_constant<(D::Produces::size > 0)> {};
-#ifndef NEG_POLLED_IGNORED
   template<typename D> struct PolledOf<D, std::void_t<decltype(D::polled)>> : std::bool_constant<D::polled> {};
-#endif
 
   // Concrete driver = DriverBase<Impl,W> + statics: addrLo/addrHi/id, Produces, read(row); a bridge adds
   // isBridge/channels/select(addr,ch)/clear(addr); optional polled. Impl is stateless; per-device state lives in the registry row.
@@ -89,10 +87,8 @@ namespace discover {
       }
       if constexpr (DeviceStateOf<Impl>::has) { if (self != noRow) W::clearState(self); }
       if constexpr (HasInit<Impl>::value) { if (self != noRow) Impl::init(self); }
-#ifndef NEG_NO_BIND
       if constexpr (HasBind<W, Impl>::value)
         if (self != noRow) W::template bind<Impl>(self);
-#endif
     }
 
     template<typename Cap>

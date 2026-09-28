@@ -50,21 +50,45 @@ if command -v clang++ >/dev/null; then
   if clang++ -std=c++17 -O2 -Wall -Wextra $INC round3.cpp -o "$OUT/r3clang" && "$OUT/r3clang" | tail -1 | grep -q "^OK"; then ok "round3 under clang"; else bad "round3 under clang"; fi
 fi
 
-echo; echo "=== broken variants must be caught ==="
-for def in NEG_NO_STATE_CLEAR NEG_SHALLOW_SUBTREE NEG_SHARED_CLIENT NEG_NO_RELEASE NEG_PUMP_DEAD NEG_ROUTE_DEAD NEG_NO_BIND NEG_NO_STATUS_CHECK NEG_NO_BOUNDS_GUARD; do
-  g++ -std=c++17 -O1 -D$def $INC round3.cpp -o "$OUT/neg" 2>/dev/null
-  ( "$OUT/neg" > "$OUT/neg.out" 2>&1 ) 2>/dev/null; st=$?
-  if [ $st = 0 ]; then bad "-D$def: the native test still passes"
-  elif [ $st -ge 128 ]; then ok "-D$def: caught (the test crashes, signal $((st-128)): a released row is dereferenced)"
-  else ok "-D$def: caught ($(grep -c '^FAIL' "$OUT/neg.out") checks fail, exit $st)"; fi
-done
-# a released binding must not reach memory it should not: without the status check the test fails cleanly (a Stale row is
-# still called), it does not crash; without the status check AND the bounds guard it does
-g++ -std=c++17 -O1 -DNEG_NO_STATUS_CHECK $INC round3.cpp -o "$OUT/neg" 2>/dev/null; ( "$OUT/neg" > "$OUT/neg.out" 2>&1 ) 2>/dev/null; st=$?
-if [ $st != 0 ] && [ $st -lt 128 ]; then ok "-DNEG_NO_STATUS_CHECK: fails cleanly, no crash: a released binding cannot index past the table"; else bad "-DNEG_NO_STATUS_CHECK: exit $st (want a clean failure)"; fi
-g++ -std=c++17 -O1 -DNEG_NO_STATUS_CHECK -DNEG_NO_BOUNDS_GUARD $INC round3.cpp -o "$OUT/neg" 2>/dev/null; ( "$OUT/neg" > "$OUT/neg.out" 2>&1 ) 2>/dev/null; st=$?
-if [ $st -ge 128 ]; then ok "-DNEG_NO_STATUS_CHECK -DNEG_NO_BOUNDS_GUARD: crashes (signal $((st-128))): the bounds guard is what holds"; else bad "-DNEG_NO_STATUS_CHECK -DNEG_NO_BOUNDS_GUARD: exit $st (want a crash)"; fi
-echo "note: -DNEG_NO_IDENTITY_CHECK is not in this list on purpose: with the registry releasing every binding, no stale binding can exist in an app with lifecycle (round2's test still catches it)."
+echo; echo "=== broken variants must be caught (each a sed-patched copy of the real header(s), not a build-time switch) ==="
+mutate() {  # name relheader sed-expr [relheader2 sed-expr2]
+  rm -rf "$OUT/mut"; mkdir -p "$OUT/mut/oneMachine/discover"; cp ../../include/oneMachine/discover/*.h "$OUT/mut/oneMachine/discover/"
+  sed -i "$3" "$OUT/mut/oneMachine/$2"
+  if cmp -s "../../include/oneMachine/$2" "$OUT/mut/oneMachine/$2"; then bad "mutation '$1' did not apply ($2)"; return; fi
+  if [ -n "${4:-}" ]; then
+    sed -i "$5" "$OUT/mut/oneMachine/$4"
+    if cmp -s "../../include/oneMachine/$4" "$OUT/mut/oneMachine/$4"; then bad "mutation '$1' did not apply ($4)"; return; fi
+  fi
+  g++ -std=c++17 -O1 -I "$OUT/mut" $INC round3.cpp -o "$OUT/mut/m" 2>/dev/null
+  ( "$OUT/mut/m" > "$OUT/mut/m.out" 2>&1 ) 2>/dev/null; st=$?
+  if [ $st = 0 ]; then bad "$1: the native test still passes"
+  elif [ $st -ge 128 ]; then ok "$1: caught (the test crashes, signal $((st-128)): a released row is dereferenced)"
+  else ok "$1: caught ($(grep -c '^FAIL' "$OUT/mut/m.out") checks fail, exit $st)"; fi
+}
+mutate "a released row's DeviceState/ClientState is not cleared (Gone leaves stale data behind)" discover/registry.h \
+  '/Dev<>::Table::clear(m);/d'
+mutate "setStatus only reaches direct children, not the whole subtree" discover/registry.h \
+  's|if (under(m, r))|if (reg.rows[m].parent == r)|'
+# Found while converting, not before: this file has exactly one ClientState-bearing consumer (Banner3 over SD), so no
+# mutation of Shell::client()/OutBase::client() sharing is observable here -- round3.cpp's own scenario never actually
+# exercised the cross-consumer collision the old NEG_SHARED_CLIENT switch claimed to guard against. The sharing code
+# itself is gone from the header regardless (SharedCs no longer exists, in either file); a real regression test for
+# it needs two consumers of the same ClientState type, which is new test-scenario work, not part of this conversion.
+skip "SharedCs's cross-consumer collision has no observable case in this file (one ClientState-bearing consumer); the old switch was untested here even before conversion"
+mutate "Gone does not release the consumers bound to the row" discover/registry.h \
+  '/Self::release(m);/d'
+mutate "pump() polls dead rows (a released row is still asked to read)" discover/registry.h \
+  's|if (!reg.rows\[r\].isBus \&\& reg.status(r) == Status::Alive) {|if (!reg.rows[r].isBus) {|'
+mutate "route() sends a bridge selection through a dead row" discover/registry.h \
+  '/if constexpr (LifecycleOf<Self>::value) if (row.status() != Status::Alive) continue;/d'
+mutate "bind() is never called (the R1 hook the app relies on)" discover/driver.h \
+  '/if constexpr (HasBind<W, Impl>::value)/,+1d'
+mutate "a released Shell binding does not check the row's status (a Stale row is still called)" discover/binding.h \
+  '/if (W::reg.status(row) != Status::Alive) return nullptr;/d'
+mutate "a released Shell binding does not check status, AND DeviceState indexing has no bounds guard (out-of-table access)" discover/binding.h \
+  '/if (W::reg.status(row) != Status::Alive) return nullptr;/d' \
+  discover/state.h 's|return rows\[r < N ? r : N\];|return rows[r];|'
+echo "note: identity (NEG_NO_IDENTITY_CHECK, binding.h Shell::get()) is not repeated here on purpose: with the registry releasing every binding, no stale binding can exist in an app with lifecycle (round2's build_r2.sh already catches it)."
 if g++ -std=c++17 -DNEG_UNDECLARED_STATE $INC -fsyntax-only round3.cpp 2>&1 | grep -q "driver declares no DeviceState"; then ok "-DNEG_UNDECLARED_STATE rejected: driver declares no DeviceState"
 else bad "-DNEG_UNDECLARED_STATE was not rejected with its message"; fi
 if g++ -std=c++17 -DR3_NO_LIFE -DNEG_STATUS_WITHOUT_LIFECYCLE $INC -fsyntax-only round3.cpp 2>&1 | grep -q "setStatus writes status"; then ok "-DNEG_STATUS_WITHOUT_LIFECYCLE rejected: an app that writes status must declare lifecycle"

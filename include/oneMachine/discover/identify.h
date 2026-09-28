@@ -62,11 +62,7 @@ namespace discover {
 
   // Use<Own, D>: entries.h's generic Norm wraps a bare driver in LegacyProbe; Own asks for D's own idReg checked
   // in two stages instead -- the one place the generic entry shape reaches into a real probe.
-#ifdef NEG_OWN_REG0
-  template<typename D> struct Norm<Use<Own, D>, 1> { using Type = Use<IdProbe<0, D::id, D::addrLo, D::addrHi>, D>; };
-#else
   template<typename D> struct Norm<Use<Own, D>, 1> { using Type = Use<IdProbe<IdRegOf<D>::value, D::id, D::addrLo, D::addrHi>, D>; };
-#endif
 
   // ---- the fold: one pass over the address, entries in list order ---------------------------------------
   struct Seen { int8_t known[2] = {-1, -1}; };   // stage-1 answer per probe kind, for one address in one pass
@@ -76,11 +72,7 @@ namespace discover {
   template<uint8_t Pass, typename... K> struct KeepPass<Pass, hapi::Chain<K...>> { using Type = hapi::Chain<K...>; };
   template<uint8_t Pass, typename... K, typename E, typename... R> struct KeepPass<Pass, hapi::Chain<K...>, E, R...> {
     static constexpr uint8_t p = PassOf<E>::value;
-#ifdef NEG_ORDER
-    using Type = typename KeepPass<Pass, std::conditional_t<p == Pass || p == 2, hapi::Chain<typename Norm<E>::Type, K...>, hapi::Chain<K...>>, R...>::Type;
-#else
     using Type = typename KeepPass<Pass, std::conditional_t<p == Pass || p == 2, hapi::Chain<K..., typename Norm<E>::Type>, hapi::Chain<K...>>, R...>::Type;
-#endif
   };
   template<uint8_t Pass, typename L> struct PassEntries;
   template<uint8_t Pass, typename... E> struct PassEntries<Pass, hapi::Chain<E...>> { using Type = typename KeepPass<Pass, hapi::Chain<>, E...>::Type; };
@@ -111,42 +103,23 @@ namespace discover {
         return true;
       } else {
         if (!P::template test<W, void>(addr, bus)) return false;
-#ifdef NEG_IGNORE_ROW
-        W::reg.add(addr, nullptr, bus, false);
-#endif
-#ifndef NEG_IGNORE_BRIDGE_NOT_CLEARED
         if constexpr (!std::is_void<typename ClearedOf<E>::Type>::value) ClearedOf<E>::Type::clear(addr);
-#endif
         return true;
       }
     }
 
     // stage 1 through oneBus::probe: a read-probe where probeKindFor says so (0x30-0x37, 0x50-0x5F) or the entry asks for one
     static bool present(uint8_t addr, Seen& seen, bool readOnly) {
-#ifdef NEG_ONE_STAGE
-      (void)addr; (void)seen; (void)readOnly;
-      return true;
-#else
-#ifdef NEG_READ_KIND_WRITE
-      const oneBus::ProbeKind k = oneBus::ProbeKind::Write;
-#else
       const oneBus::ProbeKind k = readOnly ? oneBus::ProbeKind::Read : oneBus::probeKindFor(addr);
-#endif
       int8_t& m = seen.known[uint8_t(k)];
-#ifdef NEG_NO_MEMO
-      m = -1;
-#endif
       if (m < 0) {
         using Twi = typename W::Twi;
         bool ok = oneBus::probe<Twi>(addr, k);
-#ifndef NEG_NO_FAULT_RETRY
         // a bus fault (a timeout: the interface starts over after it) is the bus's, not the address's: try once more before calling it absent
         if (!ok && oneBus::isBusFault(oneBus::causeOf<Twi>())) ok = oneBus::probe<Twi>(addr, k);
-#endif
         m = ok ? 1 : 0;
       }
       return m == 1;
-#endif
     }
   };
 
@@ -220,10 +193,8 @@ namespace discover {
     : std::bool_constant<!std::is_same<Bridge, typename DriverOf_<H>::Type>::value && NotAlsoUsed<Bridge, T...>::value> {};
   template<typename E, typename... All> struct IgnoreBridgeOk : std::true_type {};
   template<typename E, typename... All> struct CheckIgnoreBridge {
-#ifndef NEG_IGNORE_BRIDGE_ALSO_USED
     static_assert(std::is_void<typename ClearedOf<E>::Type>::value || NotAlsoUsed<typename ClearedOf<E>::Type, All...>::value,
                   "IgnoreBridge names a bridge the entries also use elsewhere: state one meaning, not both");
-#endif
     static constexpr bool value = true;
   };
 

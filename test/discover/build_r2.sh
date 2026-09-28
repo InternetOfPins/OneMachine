@@ -45,14 +45,29 @@ for pair in "NEG_CLASS_NO_PROVIDER:no driver in the list provides this output cl
   else bad "-D$def was not rejected with '$msg'"; fi
 done
 
-echo; echo "=== broken variants must be caught ==="
-for def in NEG_NO_STATUS_CHECK NEG_NO_IDENTITY_CHECK NEG_NO_BIND NEG_JSON_FORMAT; do
-  g++ -std=c++17 -O1 -D$def $INC round2.cpp -o "$OUT/neg" 2>/dev/null
-  if "$OUT/neg" > "$OUT/neg.out" 2>&1; then bad "-D$def: the native test still passes"
-  else ok "-D$def: $(grep -c '^FAIL' "$OUT/neg.out") native checks fail"; fi
-done
-"$OUT/neg" > "$OUT/neg.out" 2>&1   # last one is NEG_JSON_FORMAT
-python3 check_r2.py payloads "$OUT/neg.out" >/dev/null 2>&1 && bad "-DNEG_JSON_FORMAT: the independent formatter check still passes" || ok "-DNEG_JSON_FORMAT: the independent formatter check fails too"
+echo; echo "=== broken variants must be caught (each a sed-patched copy of the real header, not a build-time switch) ==="
+mutate() {  # name relheader sed-expr [prelude: run before the checked run, e.g. to also capture check_r2.py's own view]
+  rm -rf "$OUT/mut"; mkdir -p "$OUT/mut/oneMachine/discover"; cp ../../include/oneMachine/discover/*.h "$OUT/mut/oneMachine/discover/"
+  sed -i "$3" "$OUT/mut/oneMachine/$2"
+  if cmp -s "../../include/oneMachine/$2" "$OUT/mut/oneMachine/$2"; then bad "mutation '$1' did not apply"; return; fi
+  if g++ -std=c++17 -O1 -I "$OUT/mut" $INC round2.cpp -o "$OUT/mut/m" 2>/dev/null; then
+    "$OUT/mut/m" > "$OUT/mut/m.out" 2>&1
+    n=$(grep -c '^FAIL' "$OUT/mut/m.out" || true)
+    [ "$n" -gt 0 ] && ok "$1 -> $n native checks fail" || bad "mutation '$1' went undetected"
+  else bad "$1 -> the mutated tree does not compile: a harness error, not a catch"; fi
+}
+mutate "Shell::get() does not check the row's status (a released row can still be reached)" discover/binding.h \
+  '/if (W::reg.status(row) != Status::Alive) return nullptr;/d'
+mutate "Shell::get() does not check identity (a rediscovered row's old driver pointer is still trusted)" discover/binding.h \
+  '/if (W::reg.rows\[row\].drv != instOf<Iface>()) return nullptr;/d'
+mutate "bind() is never called (the R1 hook the app relies on)" discover/driver.h \
+  '/if constexpr (HasBind<W, Impl>::value)/,+1d'
+rm -rf "$OUT/mut"; mkdir -p "$OUT/mut/oneMachine/discover"; cp ../../include/oneMachine/discover/*.h "$OUT/mut/oneMachine/discover/"
+sed -i 's|n = uint8_t(n + putStr(o + n, ",\\"value\\":"));|n = uint8_t(n + putStr(o + n, ",\\"val\\":"));|' "$OUT/mut/oneMachine/discover/format.h"
+cmp -s ../../include/oneMachine/discover/format.h "$OUT/mut/oneMachine/discover/format.h" && bad "mutation 'wrong JSON key name' did not apply"
+g++ -std=c++17 -O1 -I "$OUT/mut" $INC round2.cpp -o "$OUT/mut/jf" 2>/dev/null
+"$OUT/mut/jf" > "$OUT/mut/jf.out" 2>&1
+python3 check_r2.py payloads "$OUT/mut/jf.out" >/dev/null 2>&1 && bad "wrong JSON key name: the independent formatter check still passes" || ok "wrong JSON key name: the independent formatter check fails too"
 
 echo; echo "=== avr-g++ $(avr-g++ -dumpversion) atmega328p, MQTT excluded ==="
 AVR="avr-g++ -std=gnu++17 -Os -mmcu=atmega328p -DF_CPU=16000000UL -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -Wall -Wextra $INC"

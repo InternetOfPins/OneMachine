@@ -54,11 +54,7 @@ namespace discover { namespace fmt {
     static uint8_t encode(char* o, RowId row, typename Cap::Value v) {
       uint8_t n = putStr(o, "{\"row\":");
       n = uint8_t(n + putFixed(o + n, row, 0));
-#ifdef NEG_JSON_FORMAT
-      n = uint8_t(n + putStr(o + n, ",\"val\":"));
-#else
       n = uint8_t(n + putStr(o + n, ",\"value\":"));
-#endif
       n = uint8_t(n + putFixed(o + n, int32_t(v), Cap::decimals));
       o[n++] = '}';
       return n;

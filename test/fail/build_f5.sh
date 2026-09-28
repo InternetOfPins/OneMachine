@@ -69,19 +69,20 @@ cf "a stack that writes status, in an app without lifecycle" "-DF5_STEP=6 -DF5_N
 cf "Reprobe above Retry" "-DF5_STEP=6 -DF5_NEG_REPROBE_ABOVE_RETRY" "Reprobe takes over Retry's exhaustion: place it below Retry"
 
 echo; echo "=== F5.5 mutation checks: each broken component must make the scenarios fail ==="
-mutate5() {  # name file sed-expression [extra g++ flags]
-  # file is either a fail:: header name (patched in a copy the -I order shadows the real one with) or roundF5.cpp
-  # itself (patched in a copy, compiled instead of the original). -I . lets its own quote-includes ("../support/...")
-  # fall back to this directory unchanged, wherever the copy sits.
-  rm -rf "$OUT/mut"; mkdir -p "$OUT/mut/oneMachine/fail"; cp ../../include/oneMachine/fail/*.h "$OUT/mut/oneMachine/fail/"
+mutate5() {  # name relheader-under-oneMachine-or-roundF5.cpp sed-expression [extra g++ flags]
+  # relheader is "fail/X.h" or "discover/X.h" (patched in a copy the -I order shadows the real one with) or
+  # roundF5.cpp itself (patched in a copy, compiled instead of the original). -I . lets its own quote-includes
+  # ("../support/...") fall back to this directory unchanged, wherever the copy sits.
+  rm -rf "$OUT/mut"; mkdir -p "$OUT/mut/oneMachine/fail" "$OUT/mut/oneMachine/discover"
+  cp ../../include/oneMachine/fail/*.h "$OUT/mut/oneMachine/fail/"; cp ../../include/oneMachine/discover/*.h "$OUT/mut/oneMachine/discover/"
   src="roundF5.cpp"
   if [ -n "$2" ]; then
     if [ "$2" = roundF5.cpp ]; then
       cp roundF5.cpp "$OUT/mut/roundF5.cpp"; src="$OUT/mut/roundF5.cpp"
       sed -i "$3" "$src"; if cmp -s roundF5.cpp "$src"; then bad "mutation '$1' did not apply"; return; fi
     else
-      sed -i "$3" "$OUT/mut/oneMachine/fail/$2"
-      if cmp -s "../../include/oneMachine/fail/$2" "$OUT/mut/oneMachine/fail/$2"; then bad "mutation '$1' did not apply"; return; fi
+      sed -i "$3" "$OUT/mut/oneMachine/$2"
+      if cmp -s "../../include/oneMachine/$2" "$OUT/mut/oneMachine/$2"; then bad "mutation '$1' did not apply"; return; fi
     fi
   fi
   if g++ -std=c++17 -O2 -DF5_STEP=${M_STEP:-6} -DF5_COUNT -DF5_TAP $4 -I "$OUT/mut" -I . $INCABS "$src" -o "$OUT/mut/m" 2>/dev/null; then
@@ -93,15 +94,15 @@ mutate5 "a bus fault is handled per device (the device takes the failure)"  ""  
 mutate5 "a bus that comes back leaves its subtree Stale (per-device recovery)" ""       "" "-DF5_NEG_RECOVER_PER_DEVICE"
 mutate5 "a bus that comes back resurrects a device that is down on its own"   ""        "" "-DF5_NEG_NO_REAPPLY"
 mutate5 "a device that comes back is not initialised again"                   ""        "" "-DF5_NEG_NO_REINIT"
-mutate5 "Gone does not release the bindings"                                  ""        "" "-DNEG_NO_RELEASE"
-mutate5 "Gone does not clear the row's state"                                 ""        "" "-DNEG_NO_STATE_CLEAR"
-mutate5 "Recover fires on every kind (R-1 broken)"  layers.h  's|return k == Kind::Timeout \|\| k == Kind::Fault; }|return true; }|'
-mutate5 "a Blocked re-probe counts as a miss"       layers.h  's|else if (o.failed())   { if (++misses|else if (!o.isOk())   { if (++misses|'
+mutate5 "Gone does not release the bindings" discover/registry.h '/Self::release(m);/d'
+mutate5 "Gone does not clear the row's state" discover/registry.h '/Dev<>::Table::clear(m);/d'
+mutate5 "Recover fires on every kind (R-1 broken)"  fail/layers.h  's|return k == Kind::Timeout \|\| k == Kind::Fault; }|return true; }|'
+mutate5 "a Blocked re-probe counts as a miss"       fail/layers.h  's|else if (o.failed())   { if (++misses|else if (!o.isOk())   { if (++misses|'
 mutate5 "the bus re-probe is not gated (1 ms)"      roundF5.cpp 's|fail::Gate<100>|fail::Gate<1>|g'
-mutate5 "an operation's Stale is not written on a change only (every failure writes)" layers.h 's|else if (!stale) { stale = true; this->rowState(RowState::Stale); }|else { stale = true; this->rowState(RowState::Stale); }|'
-mutate5 "a component writes status behind the counter (RawStatus)" devedge.h 's|W::setStatus(row, discover::Status(s));|discover::RawStatus::set(W::reg, row, discover::Status(s));|' "-DDISCOVER_TEST_RAW_STATUS"
-mutate5 "a bus fault is blamed on the device's own bus (the bus above is not asked)" busedge.h 's|      if (bus == root) return o;|      return o;|'
-mutate5 "a stored operation is re-issued without routing (wrong channel)" devedge.h 's|static void reissue(RowId row)        { W::route(W::reg.rows\[row\].parent); serve|static void reissue(RowId row)        { serve|'
+mutate5 "an operation's Stale is not written on a change only (every failure writes)" fail/layers.h 's|else if (!stale) { stale = true; this->rowState(RowState::Stale); }|else { stale = true; this->rowState(RowState::Stale); }|'
+mutate5 "a component writes status behind the counter (RawStatus)" fail/devedge.h 's|W::setStatus(row, discover::Status(s));|discover::RawStatus::set(W::reg, row, discover::Status(s));|' "-DDISCOVER_TEST_RAW_STATUS"
+mutate5 "a bus fault is blamed on the device's own bus (the bus above is not asked)" fail/busedge.h 's|      if (bus == root) return o;|      return o;|'
+mutate5 "a stored operation is re-issued without routing (wrong channel)" fail/devedge.h 's|static void reissue(RowId row)        { W::route(W::reg.rows\[row\].parent); serve|static void reissue(RowId row)        { serve|'
 mutate5 "an Unknown is not checked against the bus (no probe)"       ""        "" "-DF5_NEG_NO_UNKNOWN_PROBE"
 mutate5 "rows of a kind share one slot (rank stuck at 0)"                  ""        "" "-DF5_NEG_RANK_STUCK"
 mutate5 "a slot is claimed by any row, not only its kind's (rank counts every row)" "" "" "-DF5_NEG_RANK_ANY_ROW"
@@ -109,9 +110,9 @@ mutate5 "a row past the table shares the last slot instead of running unprotecte
 mutate5 "a bus that comes back asks nobody (the hook is never called)"        ""        "" "-DF5_RECHECK -DF5_NEG_NO_RECHECK"
 mutate5 "a bus that comes back asks every device, not only the ones under it"   ""        "" "-DF5_RECHECK -DF5_NEG_RECHECK_ALL"
 M_STEP=10 mutate5 "a bus that comes back asks a device that is down for its own reasons (scenario 8, F2 build)"  ""        "" "-DF5_RECHECK -DF5_NEG_RECHECK_STALE"
-mutate5 "a stateful device's init is run without routing to its channel"       devedge.h 's|else if constexpr (ReinitOnBusReturn<Impl>::value) { W::route(W::reg.rows\[row\].parent); Impl::reinit(row); }|else if constexpr (ReinitOnBusReturn<Impl>::value) { Impl::reinit(row); }|' "-DF5_RECHECK"
+mutate5 "a stateful device's init is run without routing to its channel"       fail/devedge.h 's|else if constexpr (ReinitOnBusReturn<Impl>::value) { W::route(W::reg.rows\[row\].parent); Impl::reinit(row); }|else if constexpr (ReinitOnBusReturn<Impl>::value) { Impl::reinit(row); }|' "-DF5_RECHECK"
 mutate5 "a presence-only device is still identified by register 0 at the reprobe" ""        "" "-DF5_PRESENCE -DF5_NEG_PRESENCE_READS_ID"
-mutate5 "a device's Unknown is not retried"        devedge.h 's|KindSet<Kind::Absent, Kind::Unknown>::mask|KindSet<Kind::Absent>::mask|'
+mutate5 "a device's Unknown is not retried"        fail/devedge.h 's|KindSet<Kind::Absent, Kind::Unknown>::mask|KindSet<Kind::Absent>::mask|'
 
 echo; echo "=== F5.6 AVR (avr-g++ $(avr-g++ -dumpversion), -Os, atmega328p, linked) ==="
 FL="-std=gnu++17 -Os -mmcu=atmega328p -DF_CPU=16000000UL -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -Wall -Wextra"

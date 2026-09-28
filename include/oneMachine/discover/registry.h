@@ -133,9 +133,7 @@ namespace discover {
         for (RowId m = 0; m < reg.count; ++m) {
           const auto& row = reg.rows[m];
           if (row.isBus || row.parent != level) continue;
-#ifndef NEG_ROUTE_DEAD
           if constexpr (LifecycleOf<Self>::value) if (row.status() != Status::Alive) continue;
-#endif
           if (next != noRow && reg.rows[next].parent == m)
             DriverSet<Bridges>::select(row.drv, row.busId, reg.rows[next].busId);
           else
@@ -173,16 +171,10 @@ namespace discover {
     __attribute__((noinline)) static void pump() {
       if constexpr (LifecycleOf<Self>::value) {
         for (RowId r = 0; r < reg.count; ++r)
-#ifndef NEG_PUMP_DEAD
           if (!reg.rows[r].isBus && reg.status(r) == Status::Alive) {
-#ifndef NEG_HEALTH_IGNORED
             if constexpr (HealthOf<Self>::value) if (!Self::Health::polled(r)) continue;
-#endif
             reg.rows[r].drv->poll(r);
           }
-#else
-          if (!reg.rows[r].isBus) reg.rows[r].drv->poll(r);
-#endif
       } else {
         for (RowId r = 0; r < reg.count; ++r)
           if (!reg.rows[r].isBus) reg.rows[r].drv->poll(r);
@@ -203,11 +195,7 @@ namespace discover {
       if (r >= reg.count) return;
       apply(r, st);
       for (RowId m = RowId(r + 1); m < reg.count; ++m)
-#ifdef NEG_SHALLOW_SUBTREE
-        if (reg.rows[m].parent == r)
-#else
         if (under(m, r))
-#endif
           apply(m, st);
     }
   private:
@@ -216,12 +204,8 @@ namespace discover {
       reg.writeStatus(m, st);
       if constexpr (LifecycleOf<Self>::value) {
         if (st == Status::Gone) {
-#ifndef NEG_NO_STATE_CLEAR
           Dev<>::Table::clear(m);
-#endif
-#ifndef NEG_NO_RELEASE
           Self::release(m);
-#endif
         }
       }
     }

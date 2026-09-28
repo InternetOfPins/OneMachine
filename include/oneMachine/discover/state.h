@@ -70,11 +70,7 @@ namespace discover {
   };
   template<typename S, uint8_t N> struct Table<S, N, false> {
     inline static S rows[N + 1] = {};          // the last slot is scratch: a row past the table lands there
-#ifdef NEG_NO_BOUNDS_GUARD
-    static S& at(RowId r) { return rows[r]; }
-#else
     static S& at(RowId r) { return rows[r < N ? r : N]; }
-#endif
     static void clear(RowId r) { zeroBytes(at(r)); }
     static void clearAll() { for (RowId r = 0; r <= N; ++r) clear(r); }
   };
@@ -89,9 +85,5 @@ namespace discover {
   // a direct consumer's ClientState: one static cell per (consumer, driver type). Named only where used, so a shell
   // whose driver declares none costs nothing, and instantiating the shell does not instantiate the driver.
   template<typename Owner, typename Iface> struct ClientCell { inline static typename ClientStateOf<Iface>::Type v{}; };
-
-#ifdef NEG_SHARED_CLIENT
-  template<typename CS> struct SharedCs { inline static CS v{}; };
-#endif
 
 }

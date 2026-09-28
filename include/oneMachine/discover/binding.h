@@ -26,27 +26,17 @@ namespace discover {
     static auto& client() {
       static_assert(ClientStateOf<Iface>::has, "driver declares no ClientState");
       static_assert(!std::is_same<Owner, void>::value, "a shell on a driver with a ClientState needs its consumer as Owner (else consumers share it)");
-#ifdef NEG_SHARED_CLIENT
-      return SharedCs<typename ClientStateOf<Iface>::Type>::v;
-#else
       return ClientCell<Owner, Iface>::v;
-#endif
     }
     void resetClient() { if constexpr (ClientStateOf<Iface>::has) zeroBytes(client()); }
 
     // the interface, or nullptr unless the row is Alive and still holds this driver (a rediscovery can reuse the index)
     [[nodiscard]] Iface* get() const {
-#ifdef NEG_NO_STATUS_CHECK
-      return p;
-#else
       if (!p) return nullptr;
       if constexpr (LifecycleOf<W>::value) { if (W::reg.driverOf(row) != instOf<Iface>()) return nullptr; }   // total: nothing indexes past the table
       if (W::reg.status(row) != Status::Alive) return nullptr;
-#ifndef NEG_NO_IDENTITY_CHECK
       if (W::reg.rows[row].drv != instOf<Iface>()) return nullptr;
-#endif
       return p;
-#endif
     }
   };
 
@@ -112,27 +102,17 @@ namespace discover {
 
     // the ClientState of provider P
     template<typename P> auto& client() {
-#ifdef NEG_SHARED_CLIENT
-      return SharedCs<typename ClientStateOf<P>::Type>::v;
-#else
       return this->cs.template as<typename ClientStateOf<P>::Type>();
-#endif
     }
 
     // calls f(TypeTag<Provider>) only while the row is Alive and still holds the driver it was bound to
     template<typename F> bool visit(F&& f) const {
       if constexpr (LifecycleOf<W>::value) {
         // a released binding has no driver and never indexes; a live one is checked against the table with a total accessor
-#ifndef NEG_NO_BOUNDS_GUARD
         if (!drv || W::reg.driverOf(row) != drv) return false;
-#endif
       }
-#ifndef NEG_NO_STATUS_CHECK
       if (row == noRow || W::reg.status(row) != Status::Alive) return false;
-#endif
-#ifndef NEG_NO_IDENTITY_CHECK
       if (W::reg.rows[row].drv != drv) return false;
-#endif
       return ProviderSet<Providers>::visit(drv, static_cast<F&&>(f));
     }
   };

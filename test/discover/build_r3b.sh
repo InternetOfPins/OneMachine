@@ -61,25 +61,37 @@ for pair in "NEG_REPEAT:driver list has a repeated type: an entry is listed twic
   else bad "-D$def was not rejected with '$msg'"; fi
 done
 
-echo; echo "=== mutations: each must make the scenarios fail by their checks (a build that does not compile is a failure) ==="
-for pair in "NEG_ONE_STAGE:stage 1 skipped: the probes reach addresses nothing answers" \
-            "NEG_IGNORE_ROW:a claim creates a row" \
-            "NEG_READ_KIND_WRITE:the read-probe of a protected range is a write-probe" \
-            "NEG_ORDER:the list order is not respected" \
-            "NEG_NO_MEMO:stage 1 repeated for every entry over the same address" \
-            "NEG_OWN_REG0:Use<Own,D> ignores the driver's idReg" \
-            "NEG_NO_FAULT_RETRY:a bus timeout on the presence probe is read as absence" \
-            "NEG_POLLED_IGNORED:polled is ignored: a device that produces nothing is never refreshed" \
-            "NEG_IGNORE_BRIDGE_NOT_CLEARED:IgnoreBridge is ignored like a plain Ignore: the stale selection is never cleared"; do
-  def=${pair%%:*}; what=${pair#*:}
-  if ! g++ -std=c++17 -O1 -D$def $INC round3b.cpp -o "$OUT/neg" 2> "$OUT/neg.err"; then bad "-D$def does not compile"; head -3 "$OUT/neg.err"; continue; fi
-  bash -c '"$0" > "$1" 2>&1' "$OUT/neg" "$OUT/neg.out" 2>/dev/null; st=$?
-  n=$(grep -c '^FAIL' "$OUT/neg.out")
+echo; echo "=== mutations: each a sed-patched copy of the real header, not a build-time switch (a build that does not compile is a failure) ==="
+mutate() {  # name relheader sed-expr
+  rm -rf "$OUT/mut"; mkdir -p "$OUT/mut/oneMachine/discover"; cp ../../include/oneMachine/discover/*.h "$OUT/mut/oneMachine/discover/"
+  sed -i "$3" "$OUT/mut/oneMachine/$2"
+  if cmp -s "../../include/oneMachine/$2" "$OUT/mut/oneMachine/$2"; then bad "mutation '$1' did not apply"; return; fi
+  if ! g++ -std=c++17 -O1 -I "$OUT/mut" $INC round3b.cpp -o "$OUT/mut/neg" 2> "$OUT/mut/neg.err"; then bad "$1 does not compile"; head -3 "$OUT/mut/neg.err"; return; fi
+  bash -c '"$0" > "$1" 2>&1' "$OUT/mut/neg" "$OUT/mut/neg.out" 2>/dev/null; st=$?
+  n=$(grep -c '^FAIL' "$OUT/mut/neg.out")
   if [ "$n" -ge 1 ]; then
-    if [ $st -ge 128 ]; then ok "-D$def ($what): caught, $n checks fail, then the run crashes (signal $((st-128)))"
-    else ok "-D$def ($what): caught, $n checks fail"; fi
-  else bad "-D$def ($what): no check fails (exit $st)"; fi
-done
+    if [ $st -ge 128 ]; then ok "$1: caught, $n checks fail, then the run crashes (signal $((st-128)))"
+    else ok "$1: caught, $n checks fail"; fi
+  else bad "$1: no check fails (exit $st)"; fi
+}
+mutate "stage 1 skipped: the probes reach addresses nothing answers" discover/identify.h \
+  's|static bool present(uint8_t addr, Seen\& seen, bool readOnly) {|static bool present(uint8_t addr, Seen\& seen, bool readOnly) { return true;|'
+mutate "a claim creates a row" discover/identify.h \
+  's|        if constexpr (!std::is_void<typename ClearedOf<E>::Type>::value) ClearedOf<E>::Type::clear(addr);|        W::reg.add(addr, nullptr, bus, false);\n        if constexpr (!std::is_void<typename ClearedOf<E>::Type>::value) ClearedOf<E>::Type::clear(addr);|'
+mutate "the read-probe of a protected range is a write-probe" discover/identify.h \
+  's|const oneBus::ProbeKind k = readOnly ? oneBus::ProbeKind::Read : oneBus::probeKindFor(addr);|const oneBus::ProbeKind k = oneBus::ProbeKind::Write;|'
+mutate "the list order is not respected" discover/identify.h \
+  's|hapi::Chain<K\.\.\., typename Norm<E>::Type>|hapi::Chain<typename Norm<E>::Type, K...>|'
+mutate "stage 1 repeated for every entry over the same address" discover/identify.h \
+  's|int8_t\& m = seen.known\[uint8_t(k)\];|int8_t\& m = seen.known[uint8_t(k)]; m = -1;|'
+mutate "Use<Own,D> ignores the driver's idReg" discover/identify.h \
+  's|Use<IdProbe<IdRegOf<D>::value, D::id, D::addrLo, D::addrHi>, D>|Use<IdProbe<0, D::id, D::addrLo, D::addrHi>, D>|'
+mutate "a bus timeout on the presence probe is read as absence" discover/identify.h \
+  '/if (!ok \&\& oneBus::isBusFault(oneBus::causeOf<Twi>())) ok = oneBus::probe<Twi>(addr, k);/d'
+mutate "polled is ignored: a device that produces nothing is never refreshed" discover/driver.h \
+  '/template<typename D> struct PolledOf<D, std::void_t<decltype(D::polled)>> : std::bool_constant<D::polled> {};/d'
+mutate "IgnoreBridge is ignored like a plain Ignore: the stale selection is never cleared" discover/identify.h \
+  '/if constexpr (!std::is_void<typename ClearedOf<E>::Type>::value) ClearedOf<E>::Type::clear(addr);/d'
 
 echo; echo "=== avr-g++ $(avr-g++ -dumpversion) atmega328p: one image per entry choice ==="
 STRIP='function strip(s) { while (sub(/<[^<>]*>/, "", s)) ; return s }'
