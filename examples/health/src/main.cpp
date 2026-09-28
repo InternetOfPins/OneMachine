@@ -3,7 +3,8 @@
 // supply) instead of retrying it forever -- and a canary catches a device that silently loses its own state
 // (a brownout on its own supply, still answering but asleep) without ever being reported as a fault. Nano
 // (ATmega328P), a GY-521 (MPU6050) on A4 (SDA) / A5 (SCL), its VCC on pin 8 (MPU_VCC_PIN) instead of straight to
-// 5V, Serial 115200. See README.md for what's reliably demonstrable by hand on this wiring and what isn't.
+// 5V, Serial 115200. setup() also enables the Nano's own pull-ups on SDA/SCL -- see README.md for what that does
+// and does not make reachable by hand on this wiring.
 //
 // Line format: <ms> <name>[<row>]=<value>                        a sample
 //              STATUS <ms> row <row> <from>-><to>                 a row's status changed
@@ -100,6 +101,13 @@ void setup() {
   Serial.begin(115200);
   pinMode(MPU_VCC_PIN, OUTPUT); digitalWrite(MPU_VCC_PIN, HIGH); delay(250);   // give the module time to start
   Twi::begin();
+  // The Nano's own pull-ups on SDA/SCL (A4/A5), on top of the module's: with the module's as the only ones, a
+  // pulled bus wire is indistinguishable from a pulled sensor supply, and every fault lands on the bus row, never
+  // the device's own flap count (confirmed on real hardware). With these too, disconnecting SDA or SCL alone
+  // reads as that device failing to answer a bus that's otherwise fine -- confirmed the same way, and what the
+  // HLTH line's flap= tracks in the README's demo. Cutting the sensor's own supply (VCC) is a different case: it
+  // can leave the device's pins driven mid-transaction, which still takes the bus with it regardless of pull-ups.
+  PORTC |= (1 << 4) | (1 << 5);
   App::discover();
   Serial.println(App::reg.count > 1 ? F("MPU6050 found") : F("MPU6050 not found -- check the wiring"));
 }
