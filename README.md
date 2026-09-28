@@ -9,6 +9,13 @@ Part of the [InternetOfPins](https://github.com/InternetOfPins) project family. 
 [HAPI](https://github.com/InternetOfPins/HAPI) (the composition core) and [OneBus](https://github.com/InternetOfPins/OneBus)
 (the I2C master a real scan talks over).
 
+![Fast loops, slow supervision: OneMachine's critical loop never passes through supervision -- supervision observes and tunes, the loop is direct, static code](docs/fast-loops-slow-supervision.png)
+
+*An illustrative application, not shipped code: discovery finds devices once at boot (the only runtime part), a fast
+static loop binds directly to them, and supervision -- a menu, a shell, MQTT, the health monitor -- only ever
+touches parameters at the cycle boundary, never the loop itself. `discover::`, `fail::`, and `rosCompose::` are what
+this repo actually ships; the fusion/control loop pictured is the shape they're for.*
+
 ## Why
 
 A runtime bus (I2C, mostly) can hold a device set nobody knows until the board boots: which sensor, on which mux
