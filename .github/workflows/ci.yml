@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# HAPI and OneBus are cloned next to this repo: the test scripts reach them as ../../../HAPI/include etc.
+env:
+  ORG: https://github.com/InternetOfPins
+
+jobs:
+  # The native test programs, warnings as errors, then again under ASan+UBSan.
+  native:
+    name: native (${{ matrix.cxx }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: OneMachine
+      - name: Clone HAPI and OneBus
+        run: |
+          git clone --depth 1 $ORG/HAPI.git HAPI
+          git clone --depth 1 $ORG/OneBus.git OneBus
+      - name: Build and run
+        run: CXX=${{ matrix.cxx }} OneMachine/test/native.sh
+
+  # The same programs with cl.exe.
+  msvc:
+    name: native (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: OneMachine
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Clone HAPI and OneBus
+        run: |
+          git clone --depth 1 $env:ORG/HAPI.git HAPI
+          git clone --depth 1 $env:ORG/OneBus.git OneBus
+      - name: Build and run
+        run: |
+          $ws = $env:GITHUB_WORKSPACE
+          $inc = @("/I$ws\OneMachine\include", "/I$ws\HAPI\include", "/I$ws\OneBus\include")
+          $programs = @(
+            @{ p = "discover/round1";  d = "" },
+            @{ p = "discover/round2";  d = "/DR2_NO_MQTT" },
+            @{ p = "discover/round3";  d = "" },
+            @{ p = "discover/round3b"; d = "" },
+            @{ p = "fail/unit_f1";     d = "" },
+            @{ p = "fail/unit_f2";     d = "" },
+            @{ p = "fail/unit_f3";     d = "" },
+            @{ p = "fail/roundF1";     d = "" },
+            @{ p = "fail/roundF5";     d = "/DF5_COUNT /DF5_TAP" },
+            @{ p = "fail/roundF7";     d = "" },
+            @{ p = "rosCompose/round1"; d = "" }
+          )
+          $status = 0
+          foreach ($e in $programs) {
+            $dir = Join-Path "$ws\OneMachine\test" (Split-Path $e.p -Parent)
+            $name = Split-Path $e.p -Leaf
+            $defs = @(); if ($e.d) { $defs = $e.d -split " " }
+            Push-Location $dir
+            Write-Host "=== $($e.p) ==="
+            cl /std:c++17 /W4 /EHsc /nologo /permissive- @defs @inc "$name.cpp" /Fe:"$name.exe"
+            if ($LASTEXITCODE -ne 0) { Write-Host "FAILED (compile): $($e.p)"; $status = 1; Pop-Location; continue }
+            & ".\$name.exe"
+            if ($LASTEXITCODE -ne 0) { Write-Host "FAILED (run): $($e.p)"; $status = 1 }
+            Pop-Location
+          }
+          exit $status
+
+  # The full suites: native, AVR (avr-g++ -Os), the zero-cost and byte-identity baselines, and the simavr checksums.
+  # They share simavr's gdb port, so they run one after another.
+  suites:
+    name: suites (native + AVR + simavr)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: OneMachine
+      - name: Clone HAPI and OneBus
+        run: |
+          git clone --depth 1 $ORG/HAPI.git HAPI
+          git clone --depth 1 $ORG/OneBus.git OneBus
+      - name: Install the AVR toolchain and simulator
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-avr avr-libc binutils-avr simavr gdb-avr clang
+      - name: discover
+        run: OneMachine/test/discover/build.sh
+      - name: fail
+        run: OneMachine/test/fail/build.sh
+      - name: rosCompose
+        run: OneMachine/test/rosCompose/build.sh
+
+  # Every example, built for the Nano.
+  examples:
+    name: examples (Nano)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: OneMachine
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Clone the libraries the examples build against
+        run: |
+          git clone --depth 1 $ORG/HAPI.git HAPI
+          git clone --depth 1 $ORG/OneBus.git OneBus
+          git clone --depth 1 $ORG/OneChip.git OneChip
+          python3 - <<'PY'
+          import json, os, subprocess
+          seen = {"OneMachine", "HAPI", "OneBus", "OneChip"}
+          queue = ["OneBus", "OneChip"]
+          while queue:
+              name = queue.pop(0)
+              path = os.path.join(name, "library.json")
+              deps = list(json.load(open(path)).get("dependencies", {})) if os.path.isfile(path) else []
+              for dep in deps:
+                  if dep in seen:
+                      continue
+                  seen.add(dep)
+                  subprocess.run(["git", "clone", "--depth", "1", f"https://github.com/InternetOfPins/{dep}.git", dep], check=True)
+                  queue.append(dep)
+          PY
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-atmelavr-${{ hashFiles('OneMachine/examples/*/platformio.ini') }}
+      - run: pip install platformio
+      - run: OneMachine/test/examples/build.sh
