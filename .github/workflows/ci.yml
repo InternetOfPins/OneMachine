@@ -72,10 +72,10 @@ jobs:
             if ($code -ne 0) {
               Write-Host ("FAILED (run): {0}, exit code 0x{1:X8}" -f $e.p, $code)
               $status = 1
-              # again under AddressSanitizer: its report names the fault, and unlike buffered stdout it survives a crash
-              cl /std:c++17 /EHsc /nologo /permissive- /Zi /Od /fsanitize=address @defs @inc "$name.cpp" /Fe:"${name}_asan.exe"
-              if ($LASTEXITCODE -eq 0) { & ".\${name}_asan.exe"; Write-Host "ASan run exit code: $LASTEXITCODE" }
-              else { Write-Host "ASan build not available" }
+              # again with stdout unbuffered (a crash loses buffered output), so the output shows how far it got
+              Set-Content -Path unbuf.h -Value '#include <cstdio>', 'namespace { struct Unbuf { Unbuf() { std::setvbuf(stdout, nullptr, _IONBF, 0); } } unbuf_; }'
+              cl /std:c++17 /EHsc /nologo /permissive- /Zi /Od /FIunbuf.h @defs @inc "$name.cpp" /Fe:"${name}_dbg.exe"
+              if ($LASTEXITCODE -eq 0) { & ".\${name}_dbg.exe"; Write-Host "unbuffered run exit code: $LASTEXITCODE" }
             }
             Pop-Location
           }

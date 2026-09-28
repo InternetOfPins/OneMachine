@@ -355,8 +355,14 @@ static_assert(discover::BinderSet<BindersF<10>>::served<DriversF<10>>, "a bindin
 static_assert(discover::DriverSet<DriversF<10>>::distinct, "driver list has a repeated type");
 // zero cost where nothing is declared: drivers that declare no state need no slot
 template<typename X> using R2Drivers = Chain<SensorA<X>, SensorB<X>, Mux<X>, TextDisplay<X>, LineDisplay<X>>;
-struct Incomplete;
-static_assert(__is_empty(discover::DevSlotOf<R2Drivers<Incomplete>>) && __is_empty(discover::CliSlotOf<R2Drivers<Incomplete>>),
+// the world these drivers are named with: none is needed. MSVC instantiates a class template's virtual members along with
+// the class, so there the world has to be a complete type that has route() and reg.
+#ifdef _MSC_VER
+using NoWorld = App;
+#else
+struct NoWorld;
+#endif
+static_assert(__is_empty(discover::DevSlotOf<R2Drivers<NoWorld>>) && __is_empty(discover::CliSlotOf<R2Drivers<NoWorld>>),
               "drivers that declare no state need no slot");
 static_assert(uint8_t(fail::RowState::Alive) == uint8_t(Status::Alive) && uint8_t(fail::RowState::Stale) == uint8_t(Status::Stale) &&
               uint8_t(fail::RowState::Gone) == uint8_t(Status::Gone), "the edges write RowState into the registry row as discover::Status");
