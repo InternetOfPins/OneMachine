@@ -68,6 +68,11 @@ namespace rosCompose {
       }
     }
     void feedback(const Feedback& f) { if (feedbackPub.link) feedbackPub.link->deliver(f); }
+
+    /// Only sees a goal while its slot is held. A terminal transition (Succeeded/Canceled/Aborted) frees the
+    /// slot inside the same advance() call that reaches it, so a poll arriving after that call cannot tell
+    /// "succeeded" from "never existed" -- both read Unknown. statusPub delivers the terminal state once, at
+    /// the moment it happens; a caller that needs it later must subscribe there, not poll stateOf() for it.
     GoalState stateOf(int id) const {
       for (auto& g : goals) if (g.used && g.id == id) return g.state;
       return GoalState::Unknown;
