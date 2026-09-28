@@ -52,15 +52,7 @@ namespace fail {
       uint8_t first = 0, n = 0;
       uint8_t offer(const R& r) {
         if (n == N) {
-#if defined(F3_NEG_BUFFER_OVERWRITE)
-          uint8_t last = uint8_t(first + n - 1); if (last >= N) last = uint8_t(last - N);
-          q[last] = r;                                                      // replaces the newest waiting record, silently
-          return 1;
-#elif defined(F3_NEG_UNCOUNTED_DROP)
-          return 0;
-#else
           this->noteDrop(); return 0;
-#endif
         }
         uint8_t i = uint8_t(first + n); if (i >= N) i = uint8_t(i - N);
         q[i] = r; ++n;
@@ -115,15 +107,8 @@ namespace fail {
       else {
         ++offered;
         const uint8_t k = ctl().offer(r);
-#ifndef F3_NEG_UNCOUNTED_DROP
         if (k == 0) { ++refused; bump(); }
         else if (k == 2) { ++replaced; bump(); }
-#else
-        (void)k;
-#endif
-#ifdef F3_NEG_BLOCKING_FANOUT
-        drain();                                                            // the sink is called from the fan-out
-#endif
       }
     }
 

@@ -24,16 +24,8 @@ namespace fail {
       if (row >= W::reg.count || W::reg.rows[row].drv != d) return noSlot;
       uint8_t k = 0;
       for (RowId r = 0; r < row; ++r)
-#ifdef F5_NEG_RANK_ANY_ROW
-        ++k;
-#else
         if (W::reg.rows[r].drv == d) ++k;
-#endif
-#ifdef F5_NEG_RANK_STUCK
-      return 0;
-#else
       return k;
-#endif
     }
   };
 
@@ -70,11 +62,7 @@ namespace fail {
 
     static S* get(RowId row) {
       const uint8_t i = Rank::of(row);
-#ifdef F5_NEG_OVERFLOW_SHARES
-      return &slots[i < K ? i : K - 1];
-#else
       return i < K ? &slots[i] : nullptr;
-#endif
     }
     template<typename F> static void serve(RowId row, Cause c, F&& op) {
       if (S* s = get(row)) { s->serve(row, c, op); return; }
@@ -91,11 +79,7 @@ namespace fail {
         const uint16_t b = uint16_t(1u << (row & 15));
         if (R::bits & b) return Outcome::Idle();
         R::bits = uint16_t(R::bits | b);
-#ifdef F5_NEG_OVERFLOW_QUIET
-        return Outcome::Idle();
-#else
         return Outcome::Fail(Kind::Overflow, K);                            // the row has no slot: say so, once
-#endif
       } else return Outcome::Idle();                                        // no return path: the counter is the only report
     }
     static FailStatus status(RowId row) { const S* s = get(row); return s ? s->status() : FailStatus{}; }

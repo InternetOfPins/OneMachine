@@ -98,7 +98,7 @@ mutate5 "the bus gives up after M (Gone) instead of staying Stale on its back-of
 mutate5 "the bus back-off never resets"           layers.h   's|      void gateStop()                   { next.disarm(); cur = 0; }|      void gateStop()                   { next.disarm(); }|'
 mutate5 "coalescing refuses and counts"           layers.h   's|        if constexpr (T::coalesces) { if (c == Cause::Fresh \&\& this->holding()) return Outcome::Pending(); }|        if constexpr (T::coalesces) { if (c == Cause::Fresh \&\& this->holding()) { this->noteDrop(); return Outcome::Pending(); } }|'
 mutate5 "Retry does not answer Pending while it holds (the failure passes)" layers.h 's|if constexpr (T::returnPath) return Outcome::Pending(); }|}|'
-mutate5 "K overflow is not reported through _serve()" ""       ""  "-DF5_SMALL_K -DF5_NEG_OVERFLOW_QUIET"
+mutate5 "K overflow is not reported through _serve()" slots.h 's|return Outcome::Fail(Kind::Overflow, K);|return Outcome::Idle();|' "-DF5_SMALL_K"
 
 echo; echo "=== F2.6 AVR (avr-g++ $(avr-g++ -dumpversion), -Os, atmega328p, linked) ==="
 FL="-std=gnu++17 -Os -mmcu=atmega328p -DF_CPU=16000000UL -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -Wall -Wextra"

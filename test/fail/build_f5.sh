@@ -104,9 +104,11 @@ mutate5 "a component writes status behind the counter (RawStatus)" fail/devedge.
 mutate5 "a bus fault is blamed on the device's own bus (the bus above is not asked)" fail/busedge.h 's|      if (bus == root) return o;|      return o;|'
 mutate5 "a stored operation is re-issued without routing (wrong channel)" fail/devedge.h 's|static void reissue(RowId row)        { W::route(W::reg.rows\[row\].parent); serve|static void reissue(RowId row)        { serve|'
 mutate5 "an Unknown is not checked against the bus (no probe)"       ""        "" "-DF5_NEG_NO_UNKNOWN_PROBE"
-mutate5 "rows of a kind share one slot (rank stuck at 0)"                  ""        "" "-DF5_NEG_RANK_STUCK"
-mutate5 "a slot is claimed by any row, not only its kind's (rank counts every row)" "" "" "-DF5_NEG_RANK_ANY_ROW"
-mutate5 "a row past the table shares the last slot instead of running unprotected" "" "" "-DF5_NEG_OVERFLOW_SHARES -DF5_SMALL_K"
+mutate5 "rows of a kind share one slot (rank stuck at 0)" fail/slots.h '0,/return k;/s//return 0;/'
+mutate5 "a slot is claimed by any row, not only its kind's (rank counts every row)" fail/slots.h \
+  's|if (W::reg.rows\[r\].drv == d) ++k;|++k;|'
+mutate5 "a row past the table shares the last slot instead of running unprotected" fail/slots.h \
+  's|return i < K ? &slots\[i\] : nullptr;|return \&slots[i < K ? i : K - 1];|' "-DF5_SMALL_K"
 mutate5 "a bus that comes back asks nobody (the hook is never called)"        ""        "" "-DF5_RECHECK -DF5_NEG_NO_RECHECK"
 mutate5 "a bus that comes back asks every device, not only the ones under it"   ""        "" "-DF5_RECHECK -DF5_NEG_RECHECK_ALL"
 M_STEP=10 mutate5 "a bus that comes back asks a device that is down for its own reasons (scenario 8, F2 build)"  ""        "" "-DF5_RECHECK -DF5_NEG_RECHECK_STALE"

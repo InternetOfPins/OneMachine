@@ -38,16 +38,29 @@ for pair in "NEG_DISPLAY_RETRY:a display keeps only the latest record: it does n
 done
 
 echo; echo "=== F3.3 mutation checks (unit level): each broken behaviour must make the tests fail (a tree that does not compile is a failure) ==="
-for pair in "F3_NEG_BUFFER_OVERWRITE:a Store on the SD consumer overwrites the newest waiting record" \
-            "F3_NEG_UNCOUNTED_DROP:a refused record is not counted" \
-            "F3_NEG_BLOCKING_FANOUT:a slow consumer blocks the fan-out (the sink is called from offer)" \
-            "F3_NEG_LATCHED_READY:a pulled card still reads ready" \
+# F3_NEG_LATCHED_READY and F3_NEG_NO_POISON_CHECK stay build-time flags: they live in mockdev.h, test support, not a
+# shipped header. The other three are delivery.h, a real public header -- sed-patched copies, like everywhere else.
+for pair in "F3_NEG_LATCHED_READY:a pulled card still reads ready" \
             "F3_NEG_NO_POISON_CHECK:a poison record is retried like any other failure, never dropped"; do
   def=${pair%%:*}; what=${pair#*:}
   if ! g++ -std=c++17 -O1 -D$def $INC unit_f3.cpp -o "$OUT/neg" 2> "$OUT/neg.err"; then bad "-D$def does not compile: $(head -2 "$OUT/neg.err" | tr '\n' ' ')"; continue; fi
   "$OUT/neg" > "$OUT/neg.out" 2>&1 || true
   n=$(grep -c '^FAIL' "$OUT/neg.out"); [ "$n" -gt 0 ] && ok "-D$def ($what) -> $n checks fail" || bad "-D$def ($what): no check fails"
 done
+mutateD() {  # name sed-expr
+  rm -rf "$OUT/mutd"; mkdir -p "$OUT/mutd/oneMachine/fail"; cp ../../include/oneMachine/fail/*.h "$OUT/mutd/oneMachine/fail/"
+  sed -i "$2" "$OUT/mutd/oneMachine/fail/delivery.h"
+  if cmp -s "../../include/oneMachine/fail/delivery.h" "$OUT/mutd/oneMachine/fail/delivery.h"; then bad "mutation '$1' did not apply"; return; fi
+  if ! g++ -std=c++17 -O1 -I "$OUT/mutd" $INC unit_f3.cpp -o "$OUT/mutd/neg" 2> "$OUT/mutd/neg.err"; then bad "$1 does not compile: $(head -2 "$OUT/mutd/neg.err" | tr '\n' ' ')"; return; fi
+  "$OUT/mutd/neg" > "$OUT/mutd/neg.out" 2>&1 || true
+  n=$(grep -c '^FAIL' "$OUT/mutd/neg.out"); [ "$n" -gt 0 ] && ok "$1 -> $n checks fail" || bad "$1: no check fails"
+}
+mutateD "a Store on the SD consumer overwrites the newest waiting record" \
+  's|          this->noteDrop(); return 0;|          uint8_t last = uint8_t(first + n - 1); if (last >= N) last = uint8_t(last - N); q[last] = r; return 1;|'
+mutateD "a refused record is not counted" \
+  's|if (k == 0) { ++refused; bump(); }|if (false) { ++refused; bump(); }|; s|else if (k == 2) { ++replaced; bump(); }|else if (false) { ++replaced; bump(); }|'
+mutateD "a slow consumer blocks the fan-out (the sink is called from offer)" \
+  's|        if (k == 0) { ++refused; bump(); }|        drain();\n        if (k == 0) { ++refused; bump(); }|'
 
 echo; echo "=== F3.4 mutations on the library header itself (a copy, patched; each must make the tests fail) ==="
 mutateL() {  # name file sed-expression
