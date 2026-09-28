@@ -19,21 +19,29 @@ pio device monitor -b 115200
 
 ## Try it
 
-Wiggle the SDA or SCL wire repeatedly for a few seconds -- enough transient faults for the monitor to notice a
-pattern, not just one recovered glitch. Expect:
+Wiggling SDA or SCL exercises the same recovery path `recover` does -- the STATUS line flips and the samples come
+back real, thanks to `reinitOnBusReturn` -- but on this wiring (nothing pulls the bus up except the module's own
+resistors) it will **not** reach Quarantine or Disconnect: pulling either wire takes the whole bus down, and the
+monitor deliberately does not count a bus-inherited Stale as the device's own flap (confirmed on real hardware,
+not assumed -- see `HANDOFF.md`-style history in the library's own `test/`). That distinction is the point: a
+device that goes down with its bus is treated as a bus problem, not a reason to isolate the device.
 
-```
-HLTH 12040 row 1 flap=40 cost=12 quarantined=0 disconnected=0
-HLTH 18500 row 1 flap=110 cost=30 quarantined=1 disconnected=0
-HLTH 31200 row 1 flap=140 cost=180 quarantined=1 disconnected=1
-```
+The canary is what you can actually see here: unplug and quickly replug the module's own VCC wire (pin 8) a few
+times in under a second -- fast enough that a hand can just about do it, or use a jumper you can tap repeatedly.
+Watch for the samples staying real instead of drifting to zero; that's `retryExtra`/`recoverMask` (Corrupt) forcing
+a re-init the moment the sleep bit is caught, the same mechanism `recover`'s `reinitOnBusReturn` uses for the
+bus-wide case.
 
-Once `disconnected=1`, pin 8 goes low: the module is powered off, `recover`'s own retry/reprobe machinery is no
-longer even touching the bus for it. Power-cycle the Nano (or the module, once pin 8 is high again) to see it
-re-discovered from a clean state.
+Quarantine and Disconnect themselves are proven where they can be isolated cleanly: the library's own
+`test/fail/build_f7.sh` (mutation-tested, simavr-verified) and, on real hardware with pull-ups that don't depend
+on the sensor's own power, this same monitor composition disconnecting a genuinely flapping device (see the
+library's development history). Reaching that state by hand on this minimal reference wiring specifically isn't
+straightforward -- a real, disclosed limitation of this wiring, not of the monitor.
 
 ## What this proves
 
 Quarantine and Disconnect are declared, not wired by hand: `mayIsolate = true` and an `isolate(RowId)` method are
 the only two things the driver adds over `recover`'s; the monitor (`fail::HealthT`) decides when to call it from
-the row's own flap-rate and cost history, tracked outside the driver entirely.
+the row's own flap-rate and cost history, tracked outside the driver entirely. And a bus fault is not a device
+flap: confirmed here by the fact that wiggling the shared bus wires, no matter how much, never isolates the
+device -- only a fault that is really the device's own does.

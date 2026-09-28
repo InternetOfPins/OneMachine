@@ -27,6 +27,11 @@ namespace mpu {
     using Produces = hapi::Chain<AccX, AccY, AccZ, GyrX, GyrY, GyrZ, Temp>;
     static constexpr uint8_t addrLo = 0x68, addrHi = 0x69, id = 0x68, idReg = 0x75;   // AD0 low / high; WHO_AM_I
 
+    // a bus that returns leaves the state of the devices below it unknown: the most common real cause is the whole
+    // bus's power going with it, which this device's own init() is safe to repeat, so it opts in to a fresh init
+    // every time its bus comes back, rather than assuming its configuration survived.
+    static constexpr bool reinitOnBusReturn = true;
+
     static void writeReg(RowId row, uint8_t reg, uint8_t v) {
       using Twi = typename W::Twi;
       Twi::begin_write(B::addrOf(row)); Twi::write_byte(reg); Twi::write_byte(v); Twi::end_write();

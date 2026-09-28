@@ -27,8 +27,11 @@ STATUS 9840 row 1 1->0
 ```
 
 (`0` is Alive, `1` is Stale in this line's raw status value.) The row goes Stale while the wire is off, comes back
-Alive on its own once it's reconnected, and the MPU6050 is reconfigured (it may have lost its registers if the
-outage was really a power loss, not just a bus fault) before sampling resumes.
+Alive on its own once it's reconnected, and the MPU6050 is reconfigured before sampling resumes -- it declares
+`reinitOnBusReturn`, so every bus return re-runs its `init()` rather than assuming its configuration survived
+(the most common real cause of a bus outage is the whole bus's power going with it, which really does reset the
+device; confirmed on real hardware -- without this, the samples come back as a steady stream of zeros, not a
+crash, easy to miss and worse to debug than a clean failure).
 
 ## What this proves
 

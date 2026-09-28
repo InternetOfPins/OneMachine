@@ -1,9 +1,12 @@
 // A real MPU6050 driver with a failure edge (fail::DevEdge) and a health monitor's Disconnect action (mayIsolate):
 // found by its own identity, woken and ranged at found(), polled through a checked read so a transient I2C fault
 // is retried and reported instead of crashing the read. If the row still flaps or costs too much bus time after
-// that, the monitor cuts the module's own supply (isolate()) instead of retrying forever. Values are scaled to
-// integers the capability's own `decimals` places: acceleration in mg (+-2 g), rotation in 0.1 deg/s (+-250 dps),
-// temperature in 0.1 C.
+// that, the monitor cuts the module's own supply (isolate()) instead of retrying forever. Two ways this device's
+// state can go stale without discovery ever noticing are both covered: its bus returning (reinitOnBusReturn --
+// the device's own power most likely went with it) and a brownout on its own supply alone, which leaves it
+// answering but asleep and reading zero (a canary: a periodic read of its own sleep bit, treated as a recoverable
+// fault). Values are scaled to integers the capability's own `decimals` places: acceleration in mg (+-2 g),
+// rotation in 0.1 deg/s (+-250 dps), temperature in 0.1 C.
 #pragma once
 #include <stdint.h>
 #include <hapi/hapi.h>
@@ -39,6 +42,20 @@ namespace mpu {
     static constexpr bool mayIsolate = true;
     static void isolate(RowId) { pinMode(MPU_VCC_PIN, OUTPUT); digitalWrite(MPU_VCC_PIN, LOW); }
 
+    // a bus that returns leaves the state of the devices below it unknown: the most common real cause is the whole
+    // bus's power going with it, which this device's own init() is safe to repeat, so it opts in to a fresh init
+    // every time its bus comes back, rather than assuming its configuration survived.
+    static constexpr bool reinitOnBusReturn = true;
+
+    // a brownout on this device's own supply, with the bus otherwise fine, leaves it answering but asleep, reading
+    // zero: nothing in the bus/device status ever flags it, so a canary asks directly. Every kCanaryEvery polls,
+    // the sleep bit (PWR_MGMT_1, set at power-up, cleared by init) is checked; set, it's reported as a recoverable
+    // fault (Corrupt, in retryExtra/recoverMask below) so Retry holds it and Recover calls init() again.
+    static constexpr uint8_t retryExtra = fail::KindSet<fail::Kind::Corrupt>::mask;
+    static constexpr uint8_t recoverMask = fail::KindSet<fail::Kind::Corrupt>::mask;
+    static constexpr uint8_t kCanaryEvery = 5;
+    inline static uint8_t sinceCheck = 0;
+
     static void writeReg(RowId row, uint8_t reg, uint8_t v) {
       using Twi = typename W::Twi;
       Twi::begin_write(B::addrOf(row)); Twi::write_byte(reg); Twi::write_byte(v); Twi::end_write();
@@ -50,6 +67,13 @@ namespace mpu {
 
     static void read(RowId row) { Edge::serve(row, fail::Cause::Fresh); }
     static fail::Outcome attempt(RowId row) {
+      if (++sinceCheck >= kCanaryEvery) {
+        sinceCheck = 0;
+        uint8_t pwr = 0;
+        const fail::Outcome c = Edge::checkedRead(row, 0x6B, &pwr, 1);
+        if (!c.isOk()) return c;
+        if (pwr & 0x40) return fail::Outcome::Fail(fail::Kind::Corrupt, pwr);
+      }
       uint8_t b[14] = {};
       const fail::Outcome o = Edge::checkedRead(row, 0x3B, b, 14);
       if (!o.isOk()) return o;

@@ -1,9 +1,9 @@
 // health -- recover adds a health monitor: a row that flaps too often, or costs too much bus time retrying, is
 // quarantined (left alone, tried again on a growing schedule) and then disconnected (isolate() cuts its own
-// supply) instead of retrying it forever. Nano (ATmega328P), a GY-521 (MPU6050) on A4 (SDA) / A5 (SCL), its VCC on
-// pin 8 (MPU_VCC_PIN) instead of straight to 5V, Serial 115200. Wiggle the wiring repeatedly (or pull VCC) and
-// watch the HLTH line: flap and cost rise, then quarantined=1, then disconnected=1 and the module's own supply
-// goes low.
+// supply) instead of retrying it forever -- and a canary catches a device that silently loses its own state
+// (a brownout on its own supply, still answering but asleep) without ever being reported as a fault. Nano
+// (ATmega328P), a GY-521 (MPU6050) on A4 (SDA) / A5 (SCL), its VCC on pin 8 (MPU_VCC_PIN) instead of straight to
+// 5V, Serial 115200. See README.md for what's reliably demonstrable by hand on this wiring and what isn't.
 //
 // Line format: <ms> <name>[<row>]=<value>                        a sample
 //              STATUS <ms> row <row> <from>-><to>                 a row's status changed
