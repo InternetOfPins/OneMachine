@@ -68,7 +68,15 @@ jobs:
             cl /std:c++17 /W4 /EHsc /nologo /permissive- @defs @inc "$name.cpp" /Fe:"$name.exe"
             if ($LASTEXITCODE -ne 0) { Write-Host "FAILED (compile): $($e.p)"; $status = 1; Pop-Location; continue }
             & ".\$name.exe"
-            if ($LASTEXITCODE -ne 0) { Write-Host "FAILED (run): $($e.p)"; $status = 1 }
+            $code = $LASTEXITCODE
+            if ($code -ne 0) {
+              Write-Host ("FAILED (run): {0}, exit code 0x{1:X8}" -f $e.p, $code)
+              $status = 1
+              # again under AddressSanitizer: its report names the fault, and unlike buffered stdout it survives a crash
+              cl /std:c++17 /EHsc /nologo /permissive- /Zi /Od /fsanitize=address @defs @inc "$name.cpp" /Fe:"${name}_asan.exe"
+              if ($LASTEXITCODE -eq 0) { & ".\${name}_asan.exe"; Write-Host "ASan run exit code: $LASTEXITCODE" }
+              else { Write-Host "ASan build not available" }
+            }
             Pop-Location
           }
           exit $status

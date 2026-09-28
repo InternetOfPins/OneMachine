@@ -420,7 +420,7 @@ static uint16_t checksum() {
 using Ticker = fail::Ticks<App, DriversF<10>>;
 
 // the tick: the bus controllers first (the root, then each channel while the bus above is up), then the device controllers
-__attribute__((noinline)) static void tickAll(uint32_t now) {
+ONEMACHINE_NOINLINE static void tickAll(uint32_t now) {
 #if F5_STEP >= 2
   App::tickBuses(now);
 #endif
@@ -457,7 +457,7 @@ __attribute__((noinline)) static void tickAll(uint32_t now) {
 
 #if F5_STEP == 8 || F5_STEP == 9 || F5_STEP == 10 || F5_STEP == 16
 // the return path's consumer: what each polled row's last operation came to (out of line, so its calls can be walked)
-__attribute__((noinline)) static uint16_t foldServe(uint16_t h) {
+ONEMACHINE_NOINLINE static uint16_t foldServe(uint16_t h) {
   for (RowId r = 6; r <= 8; ++r) {
     const fail::Outcome o = r == 6 ? SenB::_serve(r) : Cal::_serve(r);
     h = uint16_t(h * 31u + o.raw()); h = uint16_t(h * 31u + o.detail);

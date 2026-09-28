@@ -126,11 +126,17 @@ using S2  = mockdisp::Screen2;
 static_assert(discover::BinderSet<Binders3<10>>::served<Drivers3<10>>, "a binding consumer names a driver that is not in the driver list");
 // zero cost where nothing is declared: R1's and R2's driver lists have no slot at all
 template<typename X> using R2Drivers = Chain<SensorA<X>, SensorB<X>, Mux<X>, TextDisplay<X>, LineDisplay<X>>;
-struct Incomplete;
-static_assert(__is_empty(discover::DevSlotOf<R2Drivers<Incomplete>>) && __is_empty(discover::CliSlotOf<R2Drivers<Incomplete>>),
+// the world these drivers are named with: none is needed. MSVC instantiates a class template's virtual members along with
+// the class, so there the world has to be a complete type that has route() and reg.
+#ifdef _MSC_VER
+using NoWorld = App;
+#else
+struct NoWorld;
+#endif
+static_assert(__is_empty(discover::DevSlotOf<R2Drivers<NoWorld>>) && __is_empty(discover::CliSlotOf<R2Drivers<NoWorld>>),
               "drivers that declare no state need no slot");
-static_assert(!discover::DeviceStateOf<SensorB<Incomplete>>::has && !discover::DeviceStateOf<Mux<Incomplete>>::has &&
-              !discover::DeviceStateOf<LineDisplay<Incomplete>>::has, "SensorB, Mux and LineDisplay declare nothing");
+static_assert(!discover::DeviceStateOf<SensorB<NoWorld>>::has && !discover::DeviceStateOf<Mux<NoWorld>>::has &&
+              !discover::DeviceStateOf<LineDisplay<NoWorld>>::has, "SensorB, Mux and LineDisplay declare nothing");
 #ifndef __AVR__
 static_assert(!kDev || sizeof(App::Dev<>::Slot) == sizeof(int16_t), "one slot per row, the size of the largest DeviceState");
 #endif

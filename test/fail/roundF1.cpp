@@ -201,7 +201,7 @@ using fail::Step;
 //   [200,600) row 5: four hangs                                  -> exhaustion, row Gone, then Alive again
 //   [600,800) healthy
 // the tick fold behind one out-of-line function, so its calls can be inspected in the image
-__attribute__((noinline)) static void tickAll(uint32_t now) { Ticker::run(now); }
+ONEMACHINE_NOINLINE static void tickAll(uint32_t now) { Ticker::run(now); }
 
 static void scenario() {
   static const Step phase1[] = {Step::hang(), Step::hang()};
