@@ -90,10 +90,13 @@ mutate5() {  # name relheader-under-oneMachine-or-roundF5.cpp sed-expression [ex
     [ "$n" -gt 0 ] && ok "$1 -> $n checks fail" || bad "mutation '$1' went undetected"
   else bad "$1 -> the mutated tree does not compile: a harness error, not a catch"; fi
 }
-mutate5 "a bus fault is handled per device (the device takes the failure)"  ""          "" "-DF5_NEG_BUS_FAULT_PER_DEVICE"
-mutate5 "a bus that comes back leaves its subtree Stale (per-device recovery)" ""       "" "-DF5_NEG_RECOVER_PER_DEVICE"
-mutate5 "a bus that comes back resurrects a device that is down on its own"   ""        "" "-DF5_NEG_NO_REAPPLY"
-mutate5 "a device that comes back is not initialised again"                   ""        "" "-DF5_NEG_NO_REINIT"
+mutate5 "a bus fault is handled per device (the device takes the failure)" fail/busedge.h \
+  '/if (!busLevel(c)) return f;/,/return Outcome::Blocked();/c\      return f;'
+mutate5 "a bus that comes back leaves its subtree Stale (per-device recovery)" fail/busedge.h \
+  's|if (Self::under(m, bus) \&\& ownStale(m)) Self::setStatus(m, discover::Status::Stale);|if (Self::under(m, bus)) Self::setStatus(m, discover::Status::Stale);|'
+mutate5 "a bus that comes back resurrects a device that is down on its own" fail/busedge.h \
+  's|if (Self::under(m, bus) \&\& ownStale(m)) Self::setStatus(m, discover::Status::Stale);|;|'
+mutate5 "a device that comes back is not initialised again" fail/devedge.h '/^        Impl::reinit(row);$/d'
 mutate5 "Gone does not release the bindings" discover/registry.h '/Self::release(m);/d'
 mutate5 "Gone does not clear the row's state" discover/registry.h '/Dev<>::Table::clear(m);/d'
 mutate5 "Recover fires on every kind (R-1 broken)"  fail/layers.h  's|return k == Kind::Timeout \|\| k == Kind::Fault; }|return true; }|'
@@ -103,17 +106,22 @@ mutate5 "an operation's Stale is not written on a change only (every failure wri
 mutate5 "a component writes status behind the counter (RawStatus)" fail/devedge.h 's|W::setStatus(row, discover::Status(s));|discover::RawStatus::set(W::reg, row, discover::Status(s));|' "-DDISCOVER_TEST_RAW_STATUS"
 mutate5 "a bus fault is blamed on the device's own bus (the bus above is not asked)" fail/busedge.h 's|      if (bus == root) return o;|      return o;|'
 mutate5 "a stored operation is re-issued without routing (wrong channel)" fail/devedge.h 's|static void reissue(RowId row)        { W::route(W::reg.rows\[row\].parent); serve|static void reissue(RowId row)        { serve|'
-mutate5 "an Unknown is not checked against the bus (no probe)"       ""        "" "-DF5_NEG_NO_UNKNOWN_PROBE"
+mutate5 "an Unknown is not checked against the bus (no probe)" fail/busedge.h \
+  '/if (c == oneBus::TwiCause::None || c == oneBus::TwiCause::Unknown) {/,/^      }$/d'
 mutate5 "rows of a kind share one slot (rank stuck at 0)" fail/slots.h '0,/return k;/s//return 0;/'
 mutate5 "a slot is claimed by any row, not only its kind's (rank counts every row)" fail/slots.h \
   's|if (W::reg.rows\[r\].drv == d) ++k;|++k;|'
 mutate5 "a row past the table shares the last slot instead of running unprotected" fail/slots.h \
   's|return i < K ? &slots\[i\] : nullptr;|return \&slots[i < K ? i : K - 1];|' "-DF5_SMALL_K"
-mutate5 "a bus that comes back asks nobody (the hook is never called)"        ""        "" "-DF5_RECHECK -DF5_NEG_NO_RECHECK"
-mutate5 "a bus that comes back asks every device, not only the ones under it"   ""        "" "-DF5_RECHECK -DF5_NEG_RECHECK_ALL"
-M_STEP=10 mutate5 "a bus that comes back asks a device that is down for its own reasons (scenario 8, F2 build)"  ""        "" "-DF5_RECHECK -DF5_NEG_RECHECK_STALE"
+mutate5 "a bus that comes back asks nobody (the hook is never called)" fail/busedge.h \
+  '/busReturned(row);/d' "-DF5_RECHECK"
+mutate5 "a bus that comes back asks every device, not only the ones under it" fail/busedge.h \
+  '/if (!Self::under(m, bus)) continue;/d' "-DF5_RECHECK"
+M_STEP=10 mutate5 "a bus that comes back asks a device that is down for its own reasons (scenario 8, F2 build)" fail/busedge.h \
+  '/if (Self::reg.status(m) != discover::Status::Alive) continue;/d' "-DF5_RECHECK"
 mutate5 "a stateful device's init is run without routing to its channel"       fail/devedge.h 's|else if constexpr (ReinitOnBusReturn<Impl>::value) { W::route(W::reg.rows\[row\].parent); Impl::reinit(row); }|else if constexpr (ReinitOnBusReturn<Impl>::value) { Impl::reinit(row); }|' "-DF5_RECHECK"
-mutate5 "a presence-only device is still identified by register 0 at the reprobe" ""        "" "-DF5_PRESENCE -DF5_NEG_PRESENCE_READS_ID"
+mutate5 "a presence-only device is still identified by register 0 at the reprobe" fail/devedge.h \
+  '/if constexpr (PresenceOnly<Impl>::value) return Outcome::Ok();/d' "-DF5_PRESENCE"
 mutate5 "a device's Unknown is not retried"        fail/devedge.h 's|KindSet<Kind::Absent, Kind::Unknown>::mask|KindSet<Kind::Absent>::mask|'
 
 echo; echo "=== F5.6 AVR (avr-g++ $(avr-g++ -dumpversion), -Os, atmega328p, linked) ==="
@@ -127,15 +135,8 @@ avr_sum() {   # elf -> checksum stored in g_sum by the simulated ATmega328
 have_sim=0; command -v simavr >/dev/null && command -v avr-gdb >/dev/null && have_sim=1
 
 avr-g++ $FL $INC -DF5_STEP=0 roundF5.cpp -Wl,--gc-sections -o "$OUT/s0.elf" 2> "$OUT/s0.txt"
-echo "--- the bare composition against discover::'s own R3 image, built from the R3 commit's IOP-RnD sources ($R3_COMMIT)"
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git cat-file -e "$R3_COMMIT" 2>/dev/null; then
-  mkdir -p "$OUT/r3src"; (cd "$(git rev-parse --show-toplevel)" && git archive $R3_COMMIT HAPI/discoverCompose HAPI/rosCompose | tar -x -C "$OUT/r3src")
-  (cd "$OUT/r3src/HAPI/discoverCompose" && avr-g++ $FL $INCABS round3.cpp -Wl,--gc-sections -o "$OUT/r3_ref.elf")
-  for e in r3_ref s0; do avr-objcopy -O binary -j .text -j .data "$OUT/$e.elf" "$OUT/$e.bin"; done
-  if cmp -s "$OUT/r3_ref.bin" "$OUT/s0.bin"; then
-    ok "bare: flash image (.text + .data) byte-identical to discover::'s R3 all-on ($(stat -c%s "$OUT/s0.bin") B, sha $(sha256sum "$OUT/s0.bin" | cut -c1-12), $(avr-size "$OUT/s0.elf" | tail -1 | awk '{print $1" / "$2" / "$3}') text/data/bss)"
-  else bad "bare: flash image differs from discover::'s R3"; cmp -l "$OUT/r3_ref.bin" "$OUT/s0.bin" | wc -l; fi
-else skip "byte-identity needs the IOP-RnD git history (commit $R3_COMMIT)"; fi
+echo "--- the bare composition against its own recorded baseline (test/baselines/f5_bare.*): equal to discover::'s R3 all-on the day it was recorded"
+../tools/baseline.sh check f5_bare "$OUT/s0.elf" || rc=1
 if [ $have_sim = 1 ]; then
   s=$(avr_sum "$OUT/s0.elf"); [ "${s,,}" = "4910" ] && ok "bare, simavr checksum 0x$s (discover::'s R3: 0x4910)" || bad "bare simavr checksum '$s'"
 fi

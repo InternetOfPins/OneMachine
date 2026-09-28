@@ -70,7 +70,6 @@ namespace fail {
     [[nodiscard]] static Outcome verdict(RowId row) {
       const oneBus::TwiCause c = oneBus::causeOf<typename Self::Twi>();
       const RowId bus = Self::reg.rows[row].parent;
-#ifndef F5_NEG_NO_UNKNOWN_PROBE
       // A failure the core cannot explain (a read leg on Wire) may still be the bus's: the write probe reports a cause where the
       // read did not, so one probe of the bus settles it. Only on an Unknown, only once.
       if (c == oneBus::TwiCause::None || c == oneBus::TwiCause::Unknown) {
@@ -81,17 +80,12 @@ namespace fail {
           return Outcome::Blocked();
         }
       }
-#endif
       if (c == oneBus::TwiCause::None) return Outcome::Fail(Kind::Unknown, uint8_t(c));    // failed, and the core does not say why
       const Outcome f = fromCause(c);
-#ifdef F5_NEG_BUS_FAULT_PER_DEVICE
-      return f;
-#else
       if (!busLevel(c)) return f;
       const Outcome s = settle(bus, f);
       if (s.failed()) busFault(bus, s);
       return Outcome::Blocked();
-#endif
     }
 
     // ---- bus faults ----------------------------------------------------------------------------------------------
@@ -135,9 +129,7 @@ namespace fail {
       Self::setStatus(row, discover::Status(s));
       if (s == uint8_t(RowState::Alive) && Self::reg.rows[row].isBus) {
         reapply(row);
-#ifndef F5_NEG_NO_RECHECK
         busReturned(row);
-#endif
       }
     }
 
@@ -169,12 +161,8 @@ namespace fail {
   private:
     // a bus that comes back brings its subtree back, except the rows that are down for their own reasons
     static void reapply(RowId bus) {
-#ifdef F5_NEG_RECOVER_PER_DEVICE
-      for (RowId m = RowId(bus + 1); m < Self::reg.count; ++m) if (Self::under(m, bus)) Self::setStatus(m, discover::Status::Stale);
-#elif !defined(F5_NEG_NO_REAPPLY)
       for (RowId m = RowId(bus + 1); m < Self::reg.count; ++m)
         if (Self::under(m, bus) && ownStale(m)) Self::setStatus(m, discover::Status::Stale);
-#endif
     }
 
     // A bus that came back has left the state of the devices below it unknown: each one that is up is asked to check it (or to initialise
@@ -183,12 +171,8 @@ namespace fail {
       if constexpr (AnyBusReturn<Drivers>::value) {
         for (RowId m = RowId(bus + 1); m < Self::reg.count; ++m) {
           if (Self::reg.rows[m].isBus) continue;
-#ifndef F5_NEG_RECHECK_ALL
           if (!Self::under(m, bus)) continue;
-#endif
-#ifndef F5_NEG_RECHECK_STALE
           if (Self::reg.status(m) != discover::Status::Alive) continue;      // reapply() has put a device that is down for its own reasons back to Stale
-#endif
           BusReturnFold<Drivers>::template call<Self>(m);
         }
       }

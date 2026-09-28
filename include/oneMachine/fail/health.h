@@ -59,9 +59,7 @@ namespace fail {
     template<typename W> static FailStatus of(RowId m) { FailStatus s{}; (one<W, D>(m, s) || ...); return s; }
   private:
     template<typename W, typename Dr> static bool one(RowId m, FailStatus& s) {
-#ifndef F7_NEG_WRONG_ROW_COST
       if (W::reg.rows[m].drv != discover::instOf<Dr>()) return false;
-#endif
       s = Dr::failStatus(m); return true;
     }
   };
@@ -145,16 +143,10 @@ namespace fail {
       for (RowId r = 0; r < W::reg.count; ++r) {
         HealthRow& h = rows[r];
         const uint8_t cur = uint8_t(W::reg.status(r));
-#ifndef F7_NEG_BUS_AS_DEVICE_FLAP
         if (h.lastStatus == uint8_t(discover::Status::Alive) && cur == uint8_t(discover::Status::Stale) && W::ownStale(r)) {
-#else
-        if (h.lastStatus == uint8_t(discover::Status::Alive) && cur == uint8_t(discover::Status::Stale)) {
-#endif
-#ifndef F7_NEG_NO_FLAP
           h.flapEwma = ewma(h.flapEwma, 256);
           if (h.flapCount != 0xFFFF) ++h.flapCount;
           h.quietPeriods = 0;
-#endif
         }
         h.lastStatus = cur;
       }
@@ -185,11 +177,7 @@ namespace fail {
     static uint16_t ewma(uint16_t avg, uint16_t sample) { return uint16_t(int32_t(avg) + ((int32_t(sample) - int32_t(avg)) >> 3)); }
 
     static void policy(RowId r, HealthRow& h, uint32_t now) {
-#ifndef F7_NEG_IGNORE_REQUIRED
       const bool required = W::reg.rows[r].isBus ? RequiredBusFold<W>::of(r) : RequiredFold<Drivers>::template of<W>(r);
-#else
-      const bool required = false;
-#endif
       if (W::reg.rows[r].isBus) {                                          // report-only for a bus row: nothing to disconnect it from
         if (required && (h.flapEwma >= Cfg::enterQ)) escalate(r, h, EscalateReason::Flap);
         else if (h.flapEwma < Cfg::exitQ) { if (h.quietPeriods >= Cfg::quietPeriodsToCool) { h.fib.down(); h.quietPeriods = 0; } }
@@ -201,14 +189,7 @@ namespace fail {
           h.probation = true; return;                                      // elapsed: open-ended probation starts now
         }
         if (!h.probeWindowOpen) return;                                    // between probe windows: nothing new to decide
-#ifndef F7_NEG_NO_HYSTERESIS
         if (h.flapEwma < Cfg::exitQ && h.costEwma < Cfg::exitD)
-#else
-        if (h.flapEwma < Cfg::enterQ && h.costEwma < Cfg::enterD)                // broken: exits at the same level it entered, so it can toggle
-#endif
-#ifdef F7_NEG_QUARANTINE_FOREVER
-        if (false)
-#endif
         { h.quarantined = false; h.probation = false; h.probeWindowOpen = false; h.disconnected = false; return; }
         h.fib.up(Cfg::fibCap); h.probation = false; h.until = now + h.fib.cur * Cfg::quarantineUnitMs;   // still bad on a probe: a fresh, longer hard block
         return;

@@ -60,9 +60,7 @@ namespace fail {
     static void tickRow([[maybe_unused]] RowId row, [[maybe_unused]] uint32_t now) {
       if constexpr (has_tick<Stack>::value) {
         if (W::reg.status(W::reg.rows[row].parent) != discover::Status::Alive) return;
-#ifndef F5_NEG_HEALTH_TICK_IGNORED
         if constexpr (discover::HealthOf<W>::value) if (!W::Health::polled(row)) return;
-#endif
         Tab::tick(row, now);
       }
     }
@@ -91,9 +89,7 @@ namespace fail {
       const uint8_t addr = W::reg.rows[row].busId;
       W::route(W::reg.rows[row].parent);
       if (!oneBus::probe<Twi>(addr)) return W::verdict(row);
-#ifndef F5_NEG_PRESENCE_READS_ID
       if constexpr (PresenceOnly<Impl>::value) return Outcome::Ok();
-#endif
       uint8_t got = 0;
       const Outcome o = checkedRead(row, discover::IdRegOf<Impl>::value, &got, 1);
       if (!o.isOk()) return o;
@@ -105,9 +101,7 @@ namespace fail {
     static void applyState(RowId row, uint8_t s) {
       if (s == uint8_t(RowState::Alive)) {
         W::route(W::reg.rows[row].parent);
-#ifndef F5_NEG_NO_REINIT
         Impl::reinit(row);
-#endif
       }
       W::setStatus(row, discover::Status(s));
     }

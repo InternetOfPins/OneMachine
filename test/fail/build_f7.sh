@@ -29,20 +29,29 @@ if command -v clang++ >/dev/null; then
   "$OUT/f7clang" | tail -1 | grep -q '^OK' && [ "$w" = 0 ] && ok "clang++ $(clang++ -dumpversion), 0 warnings" || bad "under clang (warnings=$w)"
 fi
 
-echo; echo "=== F7.3 mutations: each must make the scenarios fail by their checks ==="
-mutate7() {  # name flags [expect-build]
-  local name="$1" flags="$2" build="${3:-default}"
-  if ! g++ -std=c++17 -O1 ${FL[$build]} $flags $INC roundF7.cpp -o "$OUT/m7" 2> "$OUT/m7.err"; then bad "$name does not compile"; head -5 "$OUT/m7.err"; return; fi
-  "$OUT/m7" > "$OUT/m7.out" 2>&1 || true
-  n=$(grep -c '^FAIL' "$OUT/m7.out" || true)
+echo; echo "=== F7.3 mutations: each a sed-patched copy of the real header, not a build-time switch; each must make the scenarios fail ==="
+mutate7() {  # name sed-expr [expect-build]
+  local name="$1" build="${3:-default}"
+  rm -rf "$OUT/mut7"; mkdir -p "$OUT/mut7/oneMachine/fail"; cp ../../include/oneMachine/fail/*.h "$OUT/mut7/oneMachine/fail/"
+  sed -i "$2" "$OUT/mut7/oneMachine/fail/health.h"
+  if cmp -s "../../include/oneMachine/fail/health.h" "$OUT/mut7/oneMachine/fail/health.h"; then bad "mutation '$name' did not apply"; return; fi
+  if ! g++ -std=c++17 -O1 ${FL[$build]} -I "$OUT/mut7" $INC roundF7.cpp -o "$OUT/mut7/m7" 2> "$OUT/mut7/m7.err"; then bad "$name does not compile"; head -5 "$OUT/mut7/m7.err"; return; fi
+  "$OUT/mut7/m7" > "$OUT/mut7/m7.out" 2>&1 || true
+  n=$(grep -c '^FAIL' "$OUT/mut7/m7.out" || true)
   [ "$n" -ge 1 ] && ok "$name -> $n checks fail" || bad "mutation '$name' went undetected"
 }
-mutate7 "the monitor never fires (no flap counted)"                       "-DF7_NEG_NO_FLAP"
-mutate7 "a bus fault is counted as its devices' own flaps"                "-DF7_NEG_BUS_AS_DEVICE_FLAP"
-mutate7 "a required row is quarantined anyway"                            "-DF7_NEG_IGNORE_REQUIRED" required
-mutate7 "no hysteresis: probation exits at the same level it entered"     "-DF7_NEG_NO_HYSTERESIS"
-mutate7 "a quarantine that never ends"                                    "-DF7_NEG_QUARANTINE_FOREVER"
-mutate7 "bus cost attributed to the wrong row"                            "-DF7_NEG_WRONG_ROW_COST"
+mutate7 "the monitor never fires (no flap counted)" \
+  '/h.flapEwma = ewma(h.flapEwma, 256);/,/h.quietPeriods = 0;/d'
+mutate7 "a bus fault is counted as its devices' own flaps" \
+  's| \&\& W::ownStale(r)||'
+mutate7 "a required row is quarantined anyway" \
+  's|const bool required = W::reg.rows\[r\].isBus ? RequiredBusFold<W>::of(r) : RequiredFold<Drivers>::template of<W>(r);|const bool required = false;|' required
+mutate7 "no hysteresis: probation exits at the same level it entered" \
+  's|if (h.flapEwma < Cfg::exitQ \&\& h.costEwma < Cfg::exitD)|if (h.flapEwma < Cfg::enterQ \&\& h.costEwma < Cfg::enterD)|'
+mutate7 "a quarantine that never ends" \
+  's|if (h.flapEwma < Cfg::exitQ \&\& h.costEwma < Cfg::exitD)|if (h.flapEwma < Cfg::exitQ \&\& h.costEwma < Cfg::exitD \&\& false)|'
+mutate7 "bus cost attributed to the wrong row" \
+  '/if (W::reg.rows\[m\].drv != discover::instOf<Dr>()) return false;/d'
 
 echo; echo "=== F7.4 AVR (avr-g++ $(avr-g++ -dumpversion), -Os, atmega328p, linked): cost, indirect calls, forbidden symbols ==="
 TB_PREFIX=""

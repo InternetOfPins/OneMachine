@@ -87,14 +87,9 @@ avr_sum() {
 }
 have_sim=0; command -v simavr >/dev/null && command -v avr-gdb >/dev/null && have_sim=1
 
-echo "--- a fan-out with consumers and no delivery layer: discover::'s R2 image, with the delivery headers included, against its own IOP-RnD history ($R2_COMMIT)"
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git cat-file -e "$R2_COMMIT" 2>/dev/null; then
-  mkdir -p "$OUT/r2src"; (cd "$(git rev-parse --show-toplevel)" && git archive $R2_COMMIT HAPI/discoverCompose HAPI/rosCompose OneBus/mqtt | tar -x -C "$OUT/r2src")
-  (cd "$OUT/r2src/HAPI/discoverCompose" && avr-g++ $FLB $INCABS round2.cpp -Wl,--gc-sections -o "$OUT/r2_old.elf")
-  avr-g++ $FLB $INCABS -include "../../include/oneMachine/fail/delivery.h" -include "../support/mockdev.h" ../discover/round2.cpp -Wl,--gc-sections -o "$OUT/r2_new.elf"
-  for e in r2_old r2_new; do avr-objcopy -O binary -j .text -j .data "$OUT/$e.elf" "$OUT/$e.bin"; done
-  if cmp -s "$OUT/r2_old.bin" "$OUT/r2_new.bin"; then ok "R2's all-bindings image is byte-identical with delivery.h and mockdev.h included ($(avr-size "$OUT/r2_new.elf" | tail -1 | awk '{print $1"/"$2"/"$3}') text/data/bss, $(stat -c %s "$OUT/r2_new.bin") B)"; else bad "R2's image differs with the delivery headers included"; fi
-else skip "byte-identity needs the IOP-RnD git history (commit $R2_COMMIT)"; fi
+echo "--- a fan-out with consumers and no delivery layer: discover::'s R2 image, with the delivery headers included, against its own recorded baseline (test/baselines/f3_r2_with_delivery.*)"
+avr-g++ $FLB $INCABS -include "../../include/oneMachine/fail/delivery.h" -include "../support/mockdev.h" ../discover/round2.cpp -Wl,--gc-sections -o "$OUT/r2_new.elf"
+../tools/baseline.sh check f3_r2_with_delivery "$OUT/r2_new.elf" || rc=1
 
 declare -A VAR=( [P]="-DF3_P" [BD]="-DF3_BD" [BS]="-DF3_BS" [BR]="-DF3_BR" [D]="-DF3_D" [S]="-DF3_S" [F]="-DF3_F" [X]="-DF3_X"
                  [ALL]="-DF3_D -DF3_S -DF3_F" [dB]="-DF3_BD -DF3_S -DF3_F" [sB]="-DF3_D -DF3_BS -DF3_F" [fB]="-DF3_D -DF3_S -DF3_BR" [ALLB]="-DF3_BD -DF3_BS -DF3_BR" )

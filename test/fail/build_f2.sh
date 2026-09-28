@@ -110,22 +110,14 @@ avr_sum() {
 }
 have_sim=0; command -v simavr >/dev/null && command -v avr-gdb >/dev/null && have_sim=1
 
-echo "--- the return path with no consumer and no layer defining it adds 0 B: every F5b composition, built from the F5b commit's own IOP-RnD sources ($F5B_COMMIT), against this tree"
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git cat-file -e "$F5B_COMMIT" 2>/dev/null; then
-  mkdir -p "$OUT/base"; (cd "$(git rev-parse --show-toplevel)" && git archive $F5B_COMMIT HAPI/failCompose HAPI/discoverCompose HAPI/rosCompose OneBus/mqtt | tar -x -C "$OUT/base")
-  same=0; total=0
-  for st in 0 1 2 3 4 5 6 15; do
-    (cd "$OUT/base/HAPI/failCompose" && avr-g++ $FL $INCABS -DF5_STEP=$st roundF5.cpp -Wl,--gc-sections -o "$OUT/base_$st.elf" 2>/dev/null)
-    avr-g++ $FL $INC -DF5_STEP=$st roundF5.cpp -Wl,--gc-sections -o "$OUT/s$st.elf" 2> "$OUT/s$st.txt"
-    for e in base_$st s$st; do avr-objcopy -O binary -j .text -j .data "$OUT/$e.elf" "$OUT/$e.bin"; done
-    total=$((total+1))
-    if cmp -s "$OUT/base_$st.bin" "$OUT/s$st.bin"; then same=$((same+1)); else bad "step $st: flash image differs from the F5b build ($(avr-size "$OUT/base_$st.elf" | tail -1 | awk '{print $1"/"$3}') vs $(avr-size "$OUT/s$st.elf" | tail -1 | awk '{print $1"/"$3}'))"; fi
-  done
-  [ $same = $total ] && ok "steps 0-6 and 15: flash image (.text + .data) byte-identical to the F5b build, $total of $total (step 0 is also R3's own image; step 6: $(avr-size "$OUT/s6.elf" | tail -1 | awk '{print $1" / "$2" / "$3}') text/data/bss)"
-else
-  skip "byte-identity needs the IOP-RnD git history (commit $F5B_COMMIT); building steps 0-6, 15 here so the rest of this section still has images to work with"
-  for st in 0 1 2 3 4 5 6 15; do avr-g++ $FL $INC -DF5_STEP=$st roundF5.cpp -Wl,--gc-sections -o "$OUT/s$st.elf" 2> "$OUT/s$st.txt"; done
-fi
+echo "--- the return path with no consumer and no layer defining it adds 0 B: every F5b composition, against its own recorded baseline (test/baselines/f2_f5b_step*.*)"
+same=0; total=0
+for st in 0 1 2 3 4 5 6 15; do
+  avr-g++ $FL $INC -DF5_STEP=$st roundF5.cpp -Wl,--gc-sections -o "$OUT/s$st.elf" 2> "$OUT/s$st.txt"
+  total=$((total+1))
+  if ../tools/baseline.sh check "f2_f5b_step$st" "$OUT/s$st.elf" >/dev/null; then same=$((same+1)); else bad "step $st: differs from its baseline ($(../tools/baseline.sh check "f2_f5b_step$st" "$OUT/s$st.elf" 2>&1 | head -3 | tr '\n' ' '))"; fi
+done
+[ $same = $total ] && ok "steps 0-6 and 15: flash image (text+data) matches each step's own baseline, $total of $total (step 0 is also R3's own image; step 6: $(avr-size "$OUT/s6.elf" | tail -1 | awk '{print $1" / "$2" / "$3}') text/data/bss)"
 
 echo "--- F2 compositions: cost, symbols, indirect calls, parity"
 names7="7 bus back-off: Retry without end + Backoff, in place of Retry<4> + Gate"

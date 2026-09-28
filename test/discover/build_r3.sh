@@ -24,20 +24,14 @@ AVRF="-std=gnu++17 -Os -mmcu=atmega328p -DF_CPU=16000000UL -ffunction-sections -
 AVR="avr-g++ $AVRF -Wall -Wextra $INC"
 flash_image() { avr-g++ $AVRF -I "$HAPI_ABS/include" -I "$ONEBUS_ABS/include" "$2" -Wl,--gc-sections -o "$1.elf" 2>/dev/null && avr-objcopy -O binary -j .text -j .data "$1.elf" "$1.bin"; }
 
-echo "=== R1 and R2 images against the R2 commit's own sources (avr-g++ $(avr-g++ -dumpversion)) ==="
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git cat-file -e "$BASE" 2>/dev/null && git cat-file -e "$R3" 2>/dev/null; then
-  mkdir -p "$OUT/base"
-  (cd "$(git rev-parse --show-toplevel)" && git archive "$BASE" HAPI/discoverCompose HAPI/rosCompose OneBus/mqtt) | tar -x -C "$OUT/base"
-  for r in round1 round2; do
-    if flash_image "$OUT/new_$r" "$PWD/$r.cpp" && flash_image "$OUT/old_$r" "$OUT/base/HAPI/discoverCompose/$r.cpp"; then
-      if cmp -s "$OUT/old_$r.bin" "$OUT/new_$r.bin"; then ok "$r: flash image byte-identical to the $BASE build ($(stat -c %s "$OUT/new_$r.bin") B)"
-      else bad "$r: flash image differs from the $BASE build ($(cmp -l "$OUT/old_$r.bin" "$OUT/new_$r.bin" | wc -l) bytes)"; fi
-    else bad "$r: does not build"; fi
-  done
-  R1=$(avr-size "$OUT/new_round1.elf" | awk 'NR==2{print $1"/"$2"/"$3}'); R2=$(avr-size "$OUT/new_round2.elf" | awk 'NR==2{print $1"/"$2"/"$3}')
-  [ "$R1" = "2496/56/201" ] && ok "R1 image text/data/bss $R1" || bad "R1 image is $R1, was 2496/56/201"
-  [ "$R2" = "5118/152/661" ] && ok "R2 all-bindings image text/data/bss $R2" || bad "R2 image is $R2, was 5118/152/661"
-else skip "byte-identity needs the IOP-RnD git history (commit $BASE)"; fi
+echo "=== R1 and R2 images against their own recorded baselines (avr-g++ $(avr-g++ -dumpversion)) ==="
+avr-g++ $AVRF $INC round1.cpp -Wl,--gc-sections -o "$OUT/new_round1.elf"
+avr-g++ $AVRF $INC -DR2_NO_MQTT round2.cpp -Wl,--gc-sections -o "$OUT/new_round2.elf"
+../tools/baseline.sh check r1_avr "$OUT/new_round1.elf" || rc=1
+../tools/baseline.sh check r2_avr "$OUT/new_round2.elf" || rc=1
+R1=$(avr-size "$OUT/new_round1.elf" | awk 'NR==2{print $1"/"$2"/"$3}'); R2=$(avr-size "$OUT/new_round2.elf" | awk 'NR==2{print $1"/"$2"/"$3}')
+[ "$R1" = "2496/56/201" ] && ok "R1 image text/data/bss $R1" || bad "R1 image is $R1, was 2496/56/201"
+[ "$R2" = "5118/152/661" ] && ok "R2 all-bindings image text/data/bss $R2" || bad "R2 image is $R2, was 5118/152/661"
 
 echo; echo "=== native g++ $(g++ -dumpversion) -O2 ==="
 if g++ -std=c++17 -O2 -Wall -Wextra $INC round3.cpp -o "$OUT/r3" && "$OUT/r3" > "$OUT/r3.out"; then
