@@ -75,7 +75,12 @@ jobs:
               # again with stdout unbuffered (a crash loses buffered output), so the output shows how far it got
               Set-Content -Path unbuf.h -Value '#include <cstdio>', 'namespace { struct Unbuf { Unbuf() { std::setvbuf(stdout, nullptr, _IONBF, 0); } } unbuf_; }'
               cl /std:c++17 /EHsc /nologo /permissive- /Zi /Od /FIunbuf.h @defs @inc "$name.cpp" /Fe:"${name}_dbg.exe"
-              if ($LASTEXITCODE -eq 0) { & ".\${name}_dbg.exe"; Write-Host "unbuffered run exit code: $LASTEXITCODE" }
+              if ($LASTEXITCODE -eq 0) {
+                & ".\${name}_dbg.exe"; Write-Host "unbuffered run exit code: $LASTEXITCODE"
+                # and the call stack at the crash, from the Windows debugger when the image has it
+                $cdb = "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe"
+                if (Test-Path $cdb) { & $cdb -g -G -c "k 40;q" ".\${name}_dbg.exe" } else { Write-Host "cdb not available" }
+              }
             }
             Pop-Location
           }
