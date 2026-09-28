@@ -7,6 +7,13 @@
 #include "driver.h"
 #include "entries.h"
 
+// keeps pump() a function of its own, so the one indirect call it makes can be found in a disassembly
+#if defined(_MSC_VER)
+#define ONEMACHINE_NOINLINE __declspec(noinline)
+#else
+#define ONEMACHINE_NOINLINE __attribute__((noinline))
+#endif
+
 namespace discover {
 
   inline constexpr RowId rootRow = 0;
@@ -168,7 +175,7 @@ namespace discover {
     }
 
     // one indirect call per device row
-    __attribute__((noinline)) static void pump() {
+    ONEMACHINE_NOINLINE static void pump() {
       if constexpr (LifecycleOf<Self>::value) {
         for (RowId r = 0; r < reg.count; ++r)
           if (!reg.rows[r].isBus && reg.status(r) == Status::Alive) {

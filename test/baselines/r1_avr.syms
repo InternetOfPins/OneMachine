@@ -1,3 +1,24 @@
+.do_clear_bss_loop
+.do_clear_bss_start
+Mux<AppN<(unsigned char)8> >::ctrl(unsigned char, unsigned char)
+SensorB<AppN<(unsigned char)8> >::read(unsigned char)
+TempLogger::log
+TempLogger::n
+ValuePrinter::Body<Temperature>::Part<rosCompose::PubCap<discover::Sample<Temperature> > >::on(discover::Sample<Temperature> const&) [clone .isra.11]
+ValuePrinter::log
+ValuePrinter::n
+__DATA_REGION_LENGTH__
+__DATA_REGION_ORIGIN__
+__EEPROM_REGION_LENGTH__
+__FUSE_REGION_LENGTH__
+__LOCK_REGION_LENGTH__
+__SIGNATURE_REGION_LENGTH__
+__SP_H__
+__SP_L__
+__SREG__
+__TEXT_REGION_LENGTH__
+__TEXT_REGION_ORIGIN__
+__USER_SIGNATURE_REGION_LENGTH__
 __bad_interrupt
 __bss_end
 __bss_start
@@ -6,73 +27,19 @@ __ctors_start
 __data_end
 __data_load_end
 __data_load_start
-__DATA_REGION_LENGTH__
-__DATA_REGION_ORIGIN__
 __data_start
-discover::DriverBase<Mux<AppN<(unsigned char)8> >, AppN<(unsigned char)8> >::poll(unsigned char)
-discover::DriverBase<SensorA<AppN<(unsigned char)8> >, AppN<(unsigned char)8> >::poll(unsigned char)
-discover::DriverBase<SensorA<AppN<(unsigned char)8> >, AppN<(unsigned char)8> >::readRegs(unsigned char, unsigned char, unsigned char*, unsigned char)
-discover::DriverBase<SensorB<AppN<(unsigned char)8> >, AppN<(unsigned char)8> >::poll(unsigned char)
-discover::DriverBase<SensorB<AppN<(unsigned char)8> >, AppN<(unsigned char)8> >::readRegs(unsigned char, unsigned char, unsigned char*, unsigned char)
-discover::Inst<Mux<AppN<(unsigned char)8> > >::obj
-discover::Inst<SensorA<AppN<(unsigned char)8> > >::obj
-discover::Inst<SensorB<AppN<(unsigned char)8> > >::obj
-discover::World<AppN<(unsigned char)8>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, mock::TwiCore>, hapi::Chain<TempLogger, ValuePrinter>, hapi::Chain<SensorA<AppN<(unsigned char)8> >, SensorB<AppN<(unsigned char)8> >, Mux<AppN<(unsigned char)8> > >, (unsigned char)8, discover::I2cScan, hapi::Chain<discover::I2cBus> >::claimedUpstream(unsigned char, unsigned char)
-discover::World<AppN<(unsigned char)8>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, mock::TwiCore>, hapi::Chain<TempLogger, ValuePrinter>, hapi::Chain<SensorA<AppN<(unsigned char)8> >, SensorB<AppN<(unsigned char)8> >, Mux<AppN<(unsigned char)8> > >, (unsigned char)8, discover::I2cScan, hapi::Chain<discover::I2cBus> >::pump()
-discover::World<AppN<(unsigned char)8>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, mock::TwiCore>, hapi::Chain<TempLogger, ValuePrinter>, hapi::Chain<SensorA<AppN<(unsigned char)8> >, SensorB<AppN<(unsigned char)8> >, Mux<AppN<(unsigned char)8> > >, (unsigned char)8, discover::I2cScan, hapi::Chain<discover::I2cBus> >::reg
-discover::World<AppN<(unsigned char)8>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, mock::TwiCore>, hapi::Chain<TempLogger, ValuePrinter>, hapi::Chain<SensorA<AppN<(unsigned char)8> >, SensorB<AppN<(unsigned char)8> >, Mux<AppN<(unsigned char)8> > >, (unsigned char)8, discover::I2cScan, hapi::Chain<discover::I2cBus> >::route(unsigned char)
 __do_clear_bss
-.do_clear_bss_loop
-.do_clear_bss_start
 __do_copy_data
-done()
 __dtors_end
 __dtors_start
-_edata
 __eeprom_end
-__EEPROM_REGION_LENGTH__
-_end
-_etext
-_exit
-exit
-__FUSE_REGION_LENGTH__
-g_sum
 __heap_end
 __init
-__LOCK_REGION_LENGTH__
-main
-mock::Bus::contention
-mock::Bus::devs
-mock::Bus::gotPtr
-mock::Bus::mask
-mock::Bus::rd
-mock::Bus::sel
-mock::Bus::state
-mock::Bus::txns
-mock::TwiCore::Part<oneBus::TwiAPI>::twi_write(unsigned char)
-Mux<AppN<(unsigned char)8> >::ctrl(unsigned char, unsigned char)
-oneBus::I2cMaster<100000ul>::Part<hapi::Chain<mock::TwiCore>::Part<oneBus::TwiAPI> >::begin_write(unsigned char)
-oneBus::I2cMaster<100000ul>::Part<hapi::Chain<mock::TwiCore>::Part<oneBus::TwiAPI> >::_rcount
-oneBus::I2cMaster<100000ul>::Part<hapi::Chain<mock::TwiCore>::Part<oneBus::TwiAPI> >::read_byte()
-oneBus::I2cMaster<100000ul>::Part<hapi::Chain<mock::TwiCore>::Part<oneBus::TwiAPI> >::request_from(unsigned char, unsigned char)
-SensorB<AppN<(unsigned char)8> >::read(unsigned char)
-__SIGNATURE_REGION_LENGTH__
-__SP_H__
-__SP_L__
-__SREG__
 __stack
 __stop_program
-TempLogger::log
-TempLogger::n
-__TEXT_REGION_LENGTH__
-__TEXT_REGION_ORIGIN__
 __tmp_reg__
 __trampolines_end
 __trampolines_start
-__USER_SIGNATURE_REGION_LENGTH__
-ValuePrinter::Body<Temperature>::Part<rosCompose::PubCap<discover::Sample<Temperature> > >::on(discover::Sample<Temperature> const&) [clone .isra.11]
-ValuePrinter::log
-ValuePrinter::n
 __vector_1
 __vector_10
 __vector_11
@@ -100,8 +67,41 @@ __vector_8
 __vector_9
 __vector_default
 __vectors
+__zero_reg__
+_edata
+_end
+_etext
+_exit
+discover::DriverBase<Mux<AppN<(unsigned char)8> >, AppN<(unsigned char)8> >::poll(unsigned char)
+discover::DriverBase<SensorA<AppN<(unsigned char)8> >, AppN<(unsigned char)8> >::poll(unsigned char)
+discover::DriverBase<SensorA<AppN<(unsigned char)8> >, AppN<(unsigned char)8> >::readRegs(unsigned char, unsigned char, unsigned char*, unsigned char)
+discover::DriverBase<SensorB<AppN<(unsigned char)8> >, AppN<(unsigned char)8> >::poll(unsigned char)
+discover::DriverBase<SensorB<AppN<(unsigned char)8> >, AppN<(unsigned char)8> >::readRegs(unsigned char, unsigned char, unsigned char*, unsigned char)
+discover::Inst<Mux<AppN<(unsigned char)8> > >::obj
+discover::Inst<SensorA<AppN<(unsigned char)8> > >::obj
+discover::Inst<SensorB<AppN<(unsigned char)8> > >::obj
+discover::World<AppN<(unsigned char)8>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, mock::TwiCore>, hapi::Chain<TempLogger, ValuePrinter>, hapi::Chain<SensorA<AppN<(unsigned char)8> >, SensorB<AppN<(unsigned char)8> >, Mux<AppN<(unsigned char)8> > >, (unsigned char)8, discover::I2cScan, hapi::Chain<discover::I2cBus> >::claimedUpstream(unsigned char, unsigned char)
+discover::World<AppN<(unsigned char)8>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, mock::TwiCore>, hapi::Chain<TempLogger, ValuePrinter>, hapi::Chain<SensorA<AppN<(unsigned char)8> >, SensorB<AppN<(unsigned char)8> >, Mux<AppN<(unsigned char)8> > >, (unsigned char)8, discover::I2cScan, hapi::Chain<discover::I2cBus> >::pump()
+discover::World<AppN<(unsigned char)8>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, mock::TwiCore>, hapi::Chain<TempLogger, ValuePrinter>, hapi::Chain<SensorA<AppN<(unsigned char)8> >, SensorB<AppN<(unsigned char)8> >, Mux<AppN<(unsigned char)8> > >, (unsigned char)8, discover::I2cScan, hapi::Chain<discover::I2cBus> >::reg
+discover::World<AppN<(unsigned char)8>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, mock::TwiCore>, hapi::Chain<TempLogger, ValuePrinter>, hapi::Chain<SensorA<AppN<(unsigned char)8> >, SensorB<AppN<(unsigned char)8> >, Mux<AppN<(unsigned char)8> > >, (unsigned char)8, discover::I2cScan, hapi::Chain<discover::I2cBus> >::route(unsigned char)
+done()
+exit
+g_sum
+main
+mock::Bus::contention
+mock::Bus::devs
+mock::Bus::gotPtr
+mock::Bus::mask
+mock::Bus::rd
+mock::Bus::sel
+mock::Bus::state
+mock::Bus::txns
+mock::TwiCore::Part<oneBus::TwiAPI>::twi_write(unsigned char)
+oneBus::I2cMaster<100000ul>::Part<hapi::Chain<mock::TwiCore>::Part<oneBus::TwiAPI> >::_rcount
+oneBus::I2cMaster<100000ul>::Part<hapi::Chain<mock::TwiCore>::Part<oneBus::TwiAPI> >::begin_write(unsigned char)
+oneBus::I2cMaster<100000ul>::Part<hapi::Chain<mock::TwiCore>::Part<oneBus::TwiAPI> >::read_byte()
+oneBus::I2cMaster<100000ul>::Part<hapi::Chain<mock::TwiCore>::Part<oneBus::TwiAPI> >::request_from(unsigned char, unsigned char)
 void discover::I2cScan::run<AppN<(unsigned char)8>, hapi::Chain<SensorA<AppN<(unsigned char)8> >, SensorB<AppN<(unsigned char)8> >, Mux<AppN<(unsigned char)8> > > >(unsigned char)
 vtable for Mux<AppN<(unsigned char)8> >
 vtable for SensorA<AppN<(unsigned char)8> >
 vtable for SensorB<AppN<(unsigned char)8> >
-__zero_reg__

@@ -59,7 +59,7 @@ namespace discover {
 
   template<typename S> inline void zeroBytes(S& s) {
     auto* p = reinterpret_cast<uint8_t*>(&s);
-    for (__SIZE_TYPE__ i = 0; i < sizeof(S); ++i) p[i] = 0;
+    for (decltype(sizeof(S)) i = 0; i < sizeof(S); ++i) p[i] = 0;
   }
 
   // one slot per registry row; nothing at all when no driver declares a DeviceState

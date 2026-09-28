@@ -16,7 +16,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIR="$HERE/../baselines"; mkdir -p "$DIR"
 TB=""; command -v avr-nm >/dev/null || TB=~/.platformio/packages/toolchain-atmelavr/bin/
 size() { "${TB}avr-size" "$1" | tail -1 | awk '{print $1, $2, $3}'; }
-syms() { "${TB}avr-nm" -C "$1" | awk '{ $1=$2=""; print }' | sed 's/^  *//' | sort; }
+# byte order, not the locale's: the lists are stored in this repo and compared on other machines
+syms() { "${TB}avr-nm" -C "$1" | awk '{ $1=$2=""; print }' | sed 's/^  *//' | LC_ALL=C sort; }
 
 case "$MODE" in
   record)

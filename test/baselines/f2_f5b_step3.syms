@@ -1,5 +1,28 @@
-__bad_interrupt
+.do_clear_bss_loop
+.do_clear_bss_start
 Banner3<AppN<(unsigned char)10> >::lcd
+FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>::inits
+FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>::attempt(unsigned char)
+Handle3<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, false>::out
+Handle3<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, true>::out
+Log3::Body<Temperature>::Part<rosCompose::PubCap<discover::Sample<Temperature> > >::on(discover::Sample<Temperature> const&) [clone .isra.73]
+Log3::log
+Log3::n
+Mux<AppN<(unsigned char)10> >::ctrl(unsigned char, unsigned char)
+StateDisplay<AppN<(unsigned char)10> >::inits
+__DATA_REGION_LENGTH__
+__DATA_REGION_ORIGIN__
+__EEPROM_REGION_LENGTH__
+__FUSE_REGION_LENGTH__
+__LOCK_REGION_LENGTH__
+__SIGNATURE_REGION_LENGTH__
+__SP_H__
+__SP_L__
+__SREG__
+__TEXT_REGION_LENGTH__
+__TEXT_REGION_ORIGIN__
+__USER_SIGNATURE_REGION_LENGTH__
+__bad_interrupt
 __bss_end
 __bss_start
 __ctors_end
@@ -7,9 +30,51 @@ __ctors_start
 __data_end
 __data_load_end
 __data_load_start
-__DATA_REGION_LENGTH__
-__DATA_REGION_ORIGIN__
 __data_start
+__do_clear_bss
+__do_copy_data
+__dtors_end
+__dtors_start
+__eeprom_end
+__heap_end
+__init
+__stack
+__stop_program
+__tmp_reg__
+__trampolines_end
+__trampolines_start
+__vector_1
+__vector_10
+__vector_11
+__vector_12
+__vector_13
+__vector_14
+__vector_15
+__vector_16
+__vector_17
+__vector_18
+__vector_19
+__vector_2
+__vector_20
+__vector_21
+__vector_22
+__vector_23
+__vector_24
+__vector_25
+__vector_3
+__vector_4
+__vector_5
+__vector_6
+__vector_7
+__vector_8
+__vector_9
+__vector_default
+__vectors
+__zero_reg__
+_edata
+_end
+_etext
+_exit
 discover::ClientCell<Banner3<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> > >::v
 discover::DriverBase<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, AppN<(unsigned char)10> >::poll(unsigned char)
 discover::DriverBase<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, AppN<(unsigned char)10> >::readRegs(unsigned char, unsigned char, unsigned char*, unsigned char)
@@ -33,19 +98,7 @@ discover::World<AppN<(unsigned char)10>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2c
 discover::World<AppN<(unsigned char)10>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, hapi::Chain<Log3>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)10, discover::I2cScan, hapi::Chain<discover::I2cBus> >::reg
 discover::World<AppN<(unsigned char)10>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, hapi::Chain<Log3>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)10, discover::I2cScan, hapi::Chain<discover::I2cBus> >::route(unsigned char)
 discover::World<AppN<(unsigned char)10>, hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, hapi::Chain<Log3>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)10, discover::I2cScan, hapi::Chain<discover::I2cBus> >::setStatus(unsigned char, discover::Status)
-__do_clear_bss
-.do_clear_bss_loop
-.do_clear_bss_start
-__do_copy_data
 done()
-__dtors_end
-__dtors_start
-_edata
-__eeprom_end
-__EEPROM_REGION_LENGTH__
-_end
-_etext
-_exit
 exit
 fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)3, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false> >::busFault(unsigned char, fail::Outcome)
 fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)3, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false> >::probeBus(unsigned char)
@@ -54,8 +107,6 @@ fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>,
 fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)3, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false> >::settle(unsigned char, fail::Outcome)
 fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)3, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false> >::tickBuses(unsigned long)
 fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)3, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false> >::verdict(unsigned char)
-failChecksum()::{lambda(fail::FailStatus const&)#1}::operator()(fail::FailStatus const&) const
-fail::fromCause(oneBus::TwiCause)
 fail::SlotTable<hapi::APIOf<fail::EdgeTerm<fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)3, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false> >::Env>, fail::Outer, fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, (unsigned char)3, fail::BusRank<AppN<(unsigned char)10> >, false, false>::get(unsigned char)
 fail::SlotTable<hapi::APIOf<fail::EdgeTerm<fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)3, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false> >::Env>, fail::Outer, fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, (unsigned char)3, fail::BusRank<AppN<(unsigned char)10> >, false, false>::overflows
 fail::SlotTable<hapi::APIOf<fail::EdgeTerm<fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)3, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false> >::Env>, fail::Outer, fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, (unsigned char)3, fail::BusRank<AppN<(unsigned char)10> >, false, false>::reset()
@@ -63,6 +114,8 @@ fail::SlotTable<hapi::APIOf<fail::EdgeTerm<fail::BusEdge<AppN<(unsigned char)10>
 fail::StatusT<true>::Part<fail::EdgeTerm<fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)3, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false> >::Env> >::noteFail(fail::Kind, unsigned char)
 fail::StatusT<true>::Part<fail::EdgeTerm<fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)3, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false> >::Env> >::noteOk()
 fail::StatusT<true>::Part<fail::EdgeTerm<fail::BusEdge<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, (unsigned char)3, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false> >::Env> >::sat(unsigned char&)
+fail::fromCause(oneBus::TwiCause)
+failChecksum()::{lambda(fail::FailStatus const&)#1}::operator()(fail::FailStatus const&) const
 fbus::CoreT<Disp>::Part<hapi::Chain<mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::_cause
 fbus::CoreT<Disp>::Part<hapi::Chain<mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::downstreamStuck(unsigned char)
 fbus::CoreT<Disp>::Part<hapi::Chain<mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::timeout()
@@ -84,18 +137,7 @@ fbus::State::stuckRoot
 fbus::State::timeouts
 fbus::State::txns
 fbus::State::wroteData
-FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>::inits
-FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>::attempt(unsigned char)
-__FUSE_REGION_LENGTH__
 g_sum
-Handle3<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, false>::out
-Handle3<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > >, true>::out
-__heap_end
-__init
-__LOCK_REGION_LENGTH__
-Log3::Body<Temperature>::Part<rosCompose::PubCap<discover::Sample<Temperature> > >::on(discover::Sample<Temperature> const&) [clone .isra.73]
-Log3::log
-Log3::n
 main
 mock3::Core::Part<hapi::Chain<mock::TwiCore>::Part<oneBus::TwiAPI> >::twi_write(unsigned char)
 mock3::Display::addr
@@ -135,56 +177,15 @@ mockdisp::ScreenT<(unsigned char)63, (unsigned char)213>::present
 mockdisp::ScreenT<(unsigned char)63, (unsigned char)213>::put(unsigned char)
 mockdisp::ScreenT<(unsigned char)63, (unsigned char)213>::sel
 mockdisp::ScreenT<(unsigned char)63, (unsigned char)213>::tx
-Mux<AppN<(unsigned char)10> >::ctrl(unsigned char, unsigned char)
-oneBus::I2cMaster<100000ul>::Part<hapi::Chain<fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::begin_write(unsigned char)
-oneBus::I2cMaster<100000ul>::Part<hapi::Chain<fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::end_write()
 oneBus::I2cMaster<100000ul>::Part<hapi::Chain<fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::_ok
 oneBus::I2cMaster<100000ul>::Part<hapi::Chain<fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::_open
 oneBus::I2cMaster<100000ul>::Part<hapi::Chain<fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::_rcount
+oneBus::I2cMaster<100000ul>::Part<hapi::Chain<fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::begin_write(unsigned char)
+oneBus::I2cMaster<100000ul>::Part<hapi::Chain<fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::end_write()
 oneBus::I2cMaster<100000ul>::Part<hapi::Chain<fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::read_byte()
 oneBus::I2cMaster<100000ul>::Part<hapi::Chain<fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::request_from(unsigned char, unsigned char)
 oneBus::I2cMaster<100000ul>::Part<hapi::Chain<fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>::Part<oneBus::TwiAPI> >::write_byte(unsigned char)
-__SIGNATURE_REGION_LENGTH__
-__SP_H__
-__SP_L__
-__SREG__
-__stack
-StateDisplay<AppN<(unsigned char)10> >::inits
-__stop_program
-__TEXT_REGION_LENGTH__
-__TEXT_REGION_ORIGIN__
 tickAll(unsigned long)
-__tmp_reg__
-__trampolines_end
-__trampolines_start
-__USER_SIGNATURE_REGION_LENGTH__
-__vector_1
-__vector_10
-__vector_11
-__vector_12
-__vector_13
-__vector_14
-__vector_15
-__vector_16
-__vector_17
-__vector_18
-__vector_19
-__vector_2
-__vector_20
-__vector_21
-__vector_22
-__vector_23
-__vector_24
-__vector_25
-__vector_3
-__vector_4
-__vector_5
-__vector_6
-__vector_7
-__vector_8
-__vector_9
-__vector_default
-__vectors
 void discover::I2cScan::run<AppN<(unsigned char)10>, hapi::Chain<FCal<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)2>, FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, oneBus::I2cMaster<100000ul>, fbus::CoreT<Disp>, mock3::Core, mock::TwiCore>, true, fail::BusCtl<fail::TickPart<fail::Retry<(unsigned char)4, false> >, fail::DetectError, fail::HoldOp<fail::RejectNewest>, fail::Gate<100ul>, fail::StatusT<true> >, DevBare, false, false>, (unsigned char)1>, Mux<AppN<(unsigned char)10> >, StateDisplay<AppN<(unsigned char)10> >, LineDisplay<AppN<(unsigned char)10> > > >(unsigned char)
 void discover::zeroBytes<Cursor>(Cursor&)
 void discover::zeroBytes<discover::Slot<Cursor> >(discover::Slot<Cursor>&)
@@ -193,4 +194,3 @@ vtable for FSensorB<AppN<(unsigned char)10>, ModeT<hapi::APIOf<oneBus::TwiAPI, o
 vtable for LineDisplay<AppN<(unsigned char)10> >
 vtable for Mux<AppN<(unsigned char)10> >
 vtable for StateDisplay<AppN<(unsigned char)10> >
-__zero_reg__

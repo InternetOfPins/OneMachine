@@ -32,8 +32,8 @@ read -r ton don bon < <("${TB}avr-size" "$OUT/on.elf"  | tail -1 | awk '{print $
 read -r tof dof bof < <("${TB}avr-size" "$OUT/off.elf" | tail -1 | awk '{print $1, $2, $3}')
 
 # symbol names only, address and value columns stripped; sorted, so instantiation order cannot cause a spurious diff
-"${TB}avr-nm" -C "$OUT/on.elf"  | awk '{ $1=$2=""; print }' | sed 's/^  *//' | sort > "$OUT/on.sym"
-"${TB}avr-nm" -C "$OUT/off.elf" | awk '{ $1=$2=""; print }' | sed 's/^  *//' | sort > "$OUT/off.sym"
+"${TB}avr-nm" -C "$OUT/on.elf"  | awk '{ $1=$2=""; print }' | sed 's/^  *//' | LC_ALL=C sort > "$OUT/on.sym"
+"${TB}avr-nm" -C "$OUT/off.elf" | awk '{ $1=$2=""; print }' | sed 's/^  *//' | LC_ALL=C sort > "$OUT/off.sym"
 
 ok=1
 if [ "$ton" != "$tof" ] || [ "$don" != "$dof" ] || [ "$bon" != "$bof" ]; then
