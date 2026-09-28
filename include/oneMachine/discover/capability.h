@@ -3,29 +3,18 @@
 #pragma once
 #include <stdint.h>
 #include <hapi/hapi.h>
+#include <oneMachine/rosCompose/transport.h>
 
 namespace discover {
 
   using RowId = uint8_t;
   inline constexpr RowId noRow = 0xFF;
 
-  // The fan-out per capability: a chain of subscribers ending in a no-op. Give a subscriber a concrete
-  // on(const Sample<Cap>&); the fold wiring below is identical for every one.
-  template<typename Msg>
-  struct FanoutEnd { static void deliver(const Msg&) {} };
-
-  template<typename Msg, typename Body>
-  struct Subscriber {
-    template<typename T>
-    struct Part : Body::template Part<T> {
-      using Base = typename Body::template Part<T>;
-      using Base::Base;
-      void deliver(const Msg& m) { Base::deliver(m); this->on(m); }   // upstream subscribers first (fold order), then this one
-    };
-  };
-
-  template<typename Msg, typename... Subs>
-  using LocalFanout = typename hapi::Chain<Subs...>::template Part<FanoutEnd<Msg>>;
+  // The fan-out per capability is rosCompose's own local topic fan-out (a chain of subscribers ending
+  // in a no-op, unchanged): a capability sample is a message like any other. Give a subscriber a
+  // concrete on(const Sample<Cap>&); the fold wiring is identical for every one.
+  using rosCompose::Subscriber;
+  using rosCompose::LocalFanout;
 
   template<typename Cap>
   struct Sample { RowId row; typename Cap::Value value; };
