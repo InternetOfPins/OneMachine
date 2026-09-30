@@ -1,6 +1,6 @@
 # OneMachine
 
-Runtime device discovery, failure handling, and ROS-shaped composition for [HAPI](https://github.com/InternetOfPins/HAPI):
+Runtime device discovery, failure handling, ROS-shaped composition and typed state for [HAPI](https://github.com/InternetOfPins/HAPI):
 scan a bus once, get a compile-time-composed table of rows back — one indirect call in `pump()`, no per-device virtual
 dispatch, no dynamic allocation. Failure edges (retry, recover, reprobe) and a health monitor (flap rate, bus cost,
 quarantine, disconnect) compose over those rows the same way, at zero cost when not chosen.
@@ -13,7 +13,7 @@ Part of the [InternetOfPins](https://github.com/InternetOfPins) project family. 
 
 *An illustrative application, not shipped code: discovery finds devices once at boot (the only runtime part), a fast
 static loop binds directly to them, and supervision -- a menu, a shell, MQTT, the health monitor -- only ever
-touches parameters at the cycle boundary, never the loop itself. `discover::`, `fail::`, and `rosCompose::` are what
+touches parameters at the cycle boundary, never the loop itself. `discover::`, `fail::`, `rosCompose::` and `state::` are what
 this repo actually ships; the fusion/control loop pictured is the shape they're for.*
 
 ## Why
@@ -145,6 +145,53 @@ goes through one seam, `Cap<Msg>`: the only virtual call in the whole module, sa
 indirect call per poll. `qos.h`'s `WithHistory`/`WithDeadline` fold onto a `Subscriber` the same way any HAPI
 decorator does; `service.h`'s `Client`/`Service` correlate a request/response pair over a fixed-capacity table (no
 heap); `action.h`'s `ActionServer` tracks goals through `GoalState`/`GoalEvent` the same way.
+
+## Typed state: `state::`
+
+One object holds the state of a composition, one named struct per layer, and the layers are addressed by tag, not by index.
+The step, the wire frame, the self-description and a schema hash all come from the same layer list:
+
+```cpp
+#include <oneMachine/state/state.h>
+#include <oneMachine/state/wire.h>
+
+struct Count { ONEMACHINE_STATE_NAME(name, "count"); };        // a layer's identity; the text is in flash on AVR
+struct Peak  { ONEMACHINE_STATE_NAME(name, "peak"); };
+
+struct CountSlot { uint16_t n; ONEMACHINE_STATE_NAME(n_n, "n");                       // fixed-width fields, one `each` naming them
+  template<class Self, class F> static constexpr void each(Self& s, F& f) { f(n_n(), s.n); } };
+struct PeakSlot  { uint16_t max; ONEMACHINE_STATE_NAME(n_max, "max");
+  template<class Self, class F> static constexpr void each(Self& s, F& f) { f(n_max(), s.max); } };
+
+struct CountStep { template<class Below, class Prev> static CountSlot run(const Below&, const Prev& prev)
+  { return {uint16_t(state::get<Count>(prev).n + 1)}; } };
+struct PeakStep  { template<class Below, class Prev> static PeakSlot run(const Below& below, const Prev& prev)
+  { uint16_t n = state::get<Count>(below).n, m = state::get<Peak>(prev).max; return {n > m ? n : m}; } };
+
+// the last layer listed runs first: Peak reads the new Count from `below`, its own old value from `prev`
+using State = hapi::APIOf<state::API, state::Layer<Peak,PeakSlot,PeakStep>, state::Layer<Count,CountSlot,CountStep>>::Res;
+ONEMACHINE_STATE_PIN(State, 0xe78c2bdfu);        // the schema as this target compiles it; a plain `int` that is 16 bits here and 32 there fails this build
+
+State prev{}, next{};
+next.step(prev);                                 // `next` is written layer by layer; a layer without a step holds its value
+uint8_t frame[state::wire_size<State>()];
+state::write(next, frame);                       // hash, then every field, little-endian at its declared width
+State peer{};
+state::read(peer, frame, sizeof frame);          // Ok, or BadHash / BadLength / BadValue with `peer` untouched
+```
+
+- `hapi/slots.h` (HAPI 0.8.0) is the storage; this module adds the names, the step, the hash and the wire.
+- `state::schema_v<R>` is a 32-bit FNV-1a over layer names, field names and field types, in chain order, at compile time.
+  A frame starts with it, so a peer refuses a frame of another schema instead of misreading it.
+- [`face.h`](include/oneMachine/state/face.h): `state::describe<R>(put)` prints what a peer needs to read a frame (and to
+  recompute its hash), `state::json(res, put)` prints the state. These are the only readers of the names; a program that
+  calls neither has no names in its flash image.
+- Field types: `bool`, 8 to 64-bit integers, and fixed-size arrays of those. Not `char`, not floating point, and the
+  widths are the ones you wrote (`int16_t`, not `int`).
+- Unique layer names, unique field names in a layer and at most `ONEMACHINE_STATE_MAX_NAMES` (32) of each are compile errors.
+- Unused, it costs nothing: a typed state and the hand-indexed byte array it replaces are the same flashed image
+  (`test/state/build.sh` compares them on an ATmega328P). The frame an AVR writes is byte-equal to the host's, and to one a
+  Python implementation builds from the description alone.
 
 ## Examples
 

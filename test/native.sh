@@ -25,6 +25,11 @@ PROGRAMS=(
   fail/roundF5:-DF5_COUNT\ -DF5_TAP
   fail/roundF7
   rosCompose/round1
+  state/check_net
+  state/check_wire
+  state/array_check
+  state/nested_check
+  state/example
 )
 
 run() {  # label dir name extra-flags compile-flags...
