@@ -61,7 +61,8 @@ jobs:
             @{ p = "state/check_wire";   d = "" },
             @{ p = "state/array_check";  d = "" },
             @{ p = "state/nested_check"; d = "" },
-            @{ p = "state/example";      d = "" }
+            @{ p = "state/example";      d = "" },
+            @{ p = "role/role_check";    d = "" }
           )
           $status = 0
           foreach ($e in $programs) {
@@ -116,6 +117,8 @@ jobs:
         run: OneMachine/test/rosCompose/build.sh
       - name: state
         run: OneMachine/test/state/build.sh
+      - name: role
+        run: OneMachine/test/role/build.sh
 
   # Every example, built for the Nano.
   examples:

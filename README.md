@@ -1,6 +1,6 @@
 # OneMachine
 
-Runtime device discovery, failure handling, ROS-shaped composition and typed state for [HAPI](https://github.com/InternetOfPins/HAPI):
+Runtime device discovery, failure handling, ROS-shaped composition, typed state and roles for [HAPI](https://github.com/InternetOfPins/HAPI):
 scan a bus once, get a compile-time-composed table of rows back — one indirect call in `pump()`, no per-device virtual
 dispatch, no dynamic allocation. Failure edges (retry, recover, reprobe) and a health monitor (flap rate, bus cost,
 quarantine, disconnect) compose over those rows the same way, at zero cost when not chosen.
@@ -192,6 +192,16 @@ state::read(peer, frame, sizeof frame);          // Ok, or BadHash / BadLength /
 - Unused, it costs nothing: a typed state and the hand-indexed byte array it replaces are the same flashed image
   (`test/state/build.sh` compares them on an ATmega328P). The frame an AVR writes is byte-equal to the host's, and to one a
   Python implementation builds from the description alone.
+
+## Roles: `role::`
+
+What an output is for, declared by the machine: `role::Role<Tag, Kind, Endpoint>` names it ("white"), gives its kind
+(`Light<4000>`) and says where it is, known only to the device. A consumer uses role names and nothing else; the device binds
+each role when discovery finds its device (`role::Found`, by driver type, address and `discover::Behind`) and routes every
+request itself. `role::Link` carries the descriptions and the command and report frames over any byte stream, and
+[`python/onemachine`](python/onemachine) is the consumer side: `m.cmd.white.level = 3000; m.push()`. Rewired firmware with the same
+roles needs nothing from the consumer; a role that is gone is reported, never retargeted. See [`docs/role.md`](docs/role.md);
+`test/role/build.sh` checks it natively, from Python across four firmware variants, and measures it on an ATmega328P.
 
 ## Examples
 

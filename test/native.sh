@@ -30,6 +30,7 @@ PROGRAMS=(
   state/array_check
   state/nested_check
   state/example
+  role/role_check
 )
 
 run() {  # label dir name extra-flags compile-flags...
