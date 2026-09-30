@@ -1,6 +1,7 @@
 """A OneMachine machine seen from its roles: the only names a consumer uses (role/role.h).
 
-    m = Machine(StreamLink.popen(['./device']))   # or any object with call(op, payload) -> (status, bytes)
+    m = Machine(StreamLink.popen(['./device']))   # over a pipe or a serial port; CtypesLink('./machine.so') in-process;
+                                                   # or any object with call(op, payload) -> (status, bytes)
     m.roles['x'].kind, m.roles['x'].params         # 'axis', {'steps_mm': 80, 'min_um': 0, 'max_um': 300000}
     m.refs                                         # the machine's `ref` lines (role/ref.h)
     m.cmd.x.target_um = 150000                     # the command, by role, range-checked
@@ -38,6 +39,38 @@ class StreamLink:
     def close(self):
         p = getattr(self, 'process', None)
         if p: p.stdin.close(); p.wait()
+
+class CtypesLink:
+    """role/call.h in the same process: a host build of the machine loaded as a shared library, called through its C ABI
+    (<prefix>_call, <prefix>_cycle; ONEMACHINE_CALL_EXPORT). The same requests and responses as StreamLink, as a function call.
+    autocycle: run the machine's cycle boundary after every call, on this process's clock (nothing else drives it in-process);
+    False when the machine's owner drives it (a thread of its own, or a simulated clock)."""
+    def __init__(self, path, prefix='onemachine', autocycle=True):
+        import ctypes, time
+        self._c, self._time = ctypes, time
+        self.lib = ctypes.CDLL(path)
+        self._call = getattr(self.lib, prefix + '_call')
+        self._call.restype = ctypes.c_int32
+        self._call.argtypes = [ctypes.c_uint8, ctypes.c_char_p, ctypes.c_uint16, ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint32]
+        self._cycle = getattr(self.lib, prefix + '_cycle')
+        self._cycle.restype = None
+        self._cycle.argtypes = [ctypes.c_uint32]
+        self.autocycle, self._t0, self._buf = autocycle, time.monotonic(), ctypes.create_string_buffer(512)
+    def now(self): return int((self._time.monotonic() - self._t0) * 1000) & 0xFFFFFFFF
+    def cycle(self): self._cycle(self.now())
+    def call(self, op, payload=b''):
+        op = ord(op) if isinstance(op, str) else op
+        payload = bytes(payload)
+        while True:
+            r = self._call(op, payload, len(payload), self._buf, len(self._buf), self.now())
+            if r >= 0: break
+            self._buf = self._c.create_string_buffer(-r)          # a long reply (a description): ask again with room for it
+        if self.autocycle: self.cycle()
+        raw = self._buf.raw[:r]
+        if r < 3: raise LinkError('short response')
+        st, n = struct.unpack_from('<BH', raw)
+        return st, raw[3:3 + n]
+    def close(self): pass
 
 def _fnv(h, data):
     for b in data: h = ((h ^ b) * 16777619) & 0xFFFFFFFF

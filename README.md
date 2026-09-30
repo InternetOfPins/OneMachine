@@ -199,7 +199,9 @@ What an output is for, declared by the machine: `role::Role<Tag, Kind, Endpoint>
 (`Light<4000>`) and says where it is, known only to the device. A consumer uses role names and nothing else; the device binds
 each role when discovery finds its device (`role::Found`, by driver type, address and `discover::Behind`) and routes every
 request itself. `role::Link` carries the descriptions and the command and report frames over any byte stream, and
-[`python/onemachine`](python/onemachine) is the consumer side: `m.cmd.white.level = 3000; m.push()`. Rewired firmware with the same
+[`python/onemachine`](python/onemachine) is the consumer side: `m.cmd.white.level = 3000; m.push()`.
+`role::Call` gives the same protocol a C ABI (`onemachine_call`) for a consumer in the same process, such as Python through ctypes or Rust
+over FFI. Rewired firmware with the same
 roles needs nothing from the consumer; a role that is gone is reported, never retargeted. See [`docs/role.md`](docs/role.md);
 `test/role/build.sh` checks it natively, from Python across four firmware variants, and measures it on an ATmega328P.
 

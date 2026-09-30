@@ -25,8 +25,9 @@ when the wiring moves, and cannot drive a device that is not the one the role me
 | `role/ref.h` | `Ref<Text>` (fixed) and `RefFrom<Src>` (run time): a `ref` line pointing at a fuller description |
 | `role/face.h` | `role::describe<M>(put)`: the machine description |
 | `role/link.h` | `Link<M, Out, App>`: descriptions, report frames and command frames over any byte stream |
+| `role/call.h` | `Call<M, App>`: the link as a function; `ONEMACHINE_CALL_EXPORT` gives it a C ABI (`onemachine_call`, `onemachine_cycle`) |
 | `role/sim.h` | simulated endpoints and a simulated I2C bus with a mux, to run a machine on a host |
-| `python/onemachine` | the consumer side: `Machine`, `Schema`, `StreamLink` |
+| `python/onemachine` | the consumer side: `Machine`, `Schema`, `StreamLink` (a byte stream), `CtypesLink` (`onemachine_call` in a shared library) |
 
 A kind alone is not the meaning: two lights are both `light`. The role name and the kind's parameters complete it, and the
 `ref` lines point at whatever fuller description the machine's author keeps (a document, a drawing, a robot description). What
@@ -90,6 +91,34 @@ print(m.poll().white.level, m.roles['white'].params, m.where['white'])
 
 A supervisor that goes quiet (no accepted command for the link's quiet time, a `fail::Deadline`) gets every role's safe command:
 lights to their safe level, switches to their safe state, axes hold where they are.
+
+## In the same process: `onemachine_call`
+
+`role::Call<M, App>` is `role::Link` without the stream: one request in, one response out, the same bytes. It is for a consumer
+in the same image or process, such as Python loading a host build, or Rust firmware calling into the C++. The flat C ABI is
+the same pattern as HAPI's `rust_stm32_bridge`, and nothing in it is specific to one language:
+
+```cpp
+static role::Call<M, App> dev(2000);               // quiet time in ms, as for Link
+ONEMACHINE_CALL_EXPORT(onemachine, dev)
+// int32_t onemachine_call(uint8_t op, const uint8_t* in, uint16_t n, uint8_t* out, uint16_t cap, uint32_t now_ms);
+// void    onemachine_cycle(uint32_t now_ms);
+```
+
+`onemachine_call` returns the response length (status, u16 length, payload). If `cap` is too small, it returns minus the length
+it needs. Only the description and frame replies are long, and they change nothing, so the consumer asks again with more room.
+Every reply that changes something fits in 3 bytes. `onemachine_cycle` is the cycle boundary: it applies an accepted command,
+applies the safe command when the consumer has gone quiet, and refreshes the report. Whoever owns the loop calls it. One call
+runs at a time; the reply buffer is shared per machine type.
+
+The consumer implements the protocol the same way it does over a serial port. From Python, the only change is the link:
+
+```python
+m = Machine(CtypesLink('./libdevice.so'))       # autocycle: runs onemachine_cycle after each call
+```
+
+`test/role/call_check.cpp` calls the C ABI directly, as Rust over FFI would. `check.py --ctypes` runs the 39 consumer checks
+through it against the same four firmware variants that run over a pipe.
 
 ## Cost, measured
 

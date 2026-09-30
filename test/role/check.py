@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """The role machine end to end: python/onemachine drives test/role/sim_device (machine.h) over role/link.h, as a consumer that knows
-nothing but role names. Usage: check.py DIR   (DIR holds sim, sim_wiring_b, sim_v2, sim_v3). Exit 1 on any failure."""
+nothing but role names. Usage: check.py DIR [--ctypes]   DIR holds sim, sim_wiring_b, sim_v2, sim_v3 (processes, over a pipe) and the
+same four as .so (--ctypes: in this process, through onemachine_call). Exit 1 on any failure."""
 import os, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'python'))
-from onemachine import Machine, StreamLink, RoleChanged, Description
+from onemachine import Machine, StreamLink, CtypesLink, RoleChanged, Description
 
 D = sys.argv[1]
+CTYPES = '--ctypes' in sys.argv[2:]
 fails = 0
 def check(what, cond, got=None):
     global fails
     if cond: print('  ok    ' + what)
     else: fails += 1; print('  FAIL  %s%s' % (what, '' if got is None else ': got %r' % (got,)))
 
-def dev(name): return StreamLink.popen([os.path.join(D, name)])
+def dev(name):                                     # the simulated clock drives the cycles ('t'), not this process's
+    return CtypesLink(os.path.join(D, name + '.so'), autocycle=False) if CTYPES else StreamLink.popen([os.path.join(D, name)])
 def run(m, ms): st, _ = m.link.call('t', struct.pack('<I', ms)); assert st == 0
 def writes(m, i): return m.link.call('w', bytes([i]))[0]
 

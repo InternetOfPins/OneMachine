@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # oneMachine/role: every claim about the role module, in one script. Exit status 1 if any check FAILs; a "note" is a measurement.
-#   native  g++ and clang++ (+ASan/UBSan): role_check (the test machine through role::Link in one process)
+#   native  g++ and clang++ (+ASan/UBSan): role_check (the test machine through role::Link in one process), call_check (role::Call's
+#           C ABI, onemachine_call/onemachine_cycle, as Rust over FFI or Python through ctypes would call it)
 #   rules   each rule of role::Machine and the kinds is a compile error with its own message (g++, clang++, avr-g++)
 #   python  python/onemachine drives the test machine as a consumer that knows only role names (check.py), across four firmware
-#           variants (rewired, a role added, a role removed); its Schema against test/state's native peers (check_schema.py);
+#           variants (rewired, a role added, a role removed), over a pipe and in-process through ctypes (CtypesLink); its Schema against test/state's native peers (check_schema.py);
 #           examples/python's drive.py against that example's host build
 #   AVR     avr-g++ -Os atmega328p in simavr: the role layer's cost per request and per scan, Fixed vs Found vs Pinned, and the link
 # HAPI=<hapi/include> overrides the HAPI checkout used (default: next to this repo).
@@ -19,12 +20,14 @@ have() { command -v "$1" >/dev/null 2>&1; }
 INC=$(realpath ../../include)
 F=(-I"$H" -I"$INC")
 
-echo "== native: the test machine through role::Link, in one process"
+echo "== native: the test machine through role::Link, and role::Call's C ABI (onemachine_call), in one process"
 for cxx in g++ clang++; do have $cxx || continue
   for label in O2 san; do
     if [ $label = O2 ]; then mode="-O2 -Wall -Wextra -Wpedantic -Werror"; else mode="-O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all"; fi
-    if ! $cxx -std=c++17 $mode "${F[@]}" role_check.cpp -o "$W/rc" 2>"$W/err"; then bad "role_check [$cxx $label]" "does not build: $(grep -m1 error "$W/err")"; continue; fi
-    o=$("$W/rc" 2>&1); [ $? -eq 0 ] && ok "role_check [$cxx $label]: $(printf '%s' "$o" | tail -1)" || bad "role_check [$cxx $label]" "$(printf '%s' "$o" | grep FAIL | head -3)"
+    for t in role_check call_check; do
+      if ! $cxx -std=c++17 $mode "${F[@]}" $t.cpp -o "$W/rc" 2>"$W/err"; then bad "$t [$cxx $label]" "does not build: $(grep -m1 error "$W/err")"; continue; fi
+      o=$("$W/rc" 2>&1); [ $? -eq 0 ] && ok "$t [$cxx $label]: $(printf '%s' "$o" | tail -1)" || bad "$t [$cxx $label]" "$(printf '%s' "$o" | grep FAIL | head -3)"
+    done
   done
 done
 
@@ -47,10 +50,15 @@ if have python3; then
   built=1
   for v in ":sim" "-DWIRING_B:sim_wiring_b" "-DFIRMWARE_V2:sim_v2" "-DFIRMWARE_V3:sim_v3"; do
     g++ -std=c++17 -O2 -Wall -Wextra -Werror ${v%%:*} "${F[@]}" sim_device.cpp -o "$W/${v##*:}" 2>"$W/err" || { bad "sim_device ${v%%:*}" "$(grep -m1 error "$W/err")"; built=0; }
+    g++ -std=c++17 -O2 -Wall -Wextra -Werror -fPIC -shared -fvisibility=hidden -DSIM_LIB ${v%%:*} "${F[@]}" sim_device.cpp -o "$W/${v##*:}.so" 2>"$W/err" || { bad "sim_device.so ${v%%:*}" "$(grep -m1 error "$W/err")"; built=0; }
   done
   if [ $built = 1 ]; then
-    python3 check.py "$W" > "$W/py.out" 2>&1; rc=$?
-    grep -c '^  ok' "$W/py.out" | { read n; [ $rc -eq 0 ] && ok "check.py: $n checks, $(tail -1 "$W/py.out")" || bad "check.py" "$(grep -E 'FAIL|Error' "$W/py.out" | head -5)"; }
+    for how in pipe ctypes; do
+      [ $how = ctypes ] && arg=--ctypes || arg=
+      python3 check.py "$W" $arg > "$W/py.out" 2>&1; rc=$?
+      n=$(grep -c '^  ok' "$W/py.out")
+      [ $rc -eq 0 ] && ok "check.py [$how]: $n checks, $(tail -1 "$W/py.out")" || bad "check.py [$how]" "$(grep -E 'FAIL|Error' "$W/py.out" | head -5)"
+    done
   fi
   if g++ -std=c++17 -O2 -Wall -Wextra -Werror "${F[@]}" ../../examples/python/host/main.cpp -o "$W/exhost" 2>"$W/err"; then
     python3 ../../examples/python/drive.py --sim "$W/exhost" --check > "$W/ex.out" 2>&1 && ok "examples/python: drive.py against the host build, $(grep -c '^  ok' "$W/ex.out") checks" || bad "examples/python drive.py" "$(grep -E 'FAIL|Error' "$W/ex.out" | head -3)"

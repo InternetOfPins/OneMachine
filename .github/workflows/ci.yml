@@ -62,7 +62,8 @@ jobs:
             @{ p = "state/array_check";  d = "" },
             @{ p = "state/nested_check"; d = "" },
             @{ p = "state/example";      d = "" },
-            @{ p = "role/role_check";    d = "" }
+            @{ p = "role/role_check";    d = "" },
+            @{ p = "role/call_check";    d = "" }
           )
           $status = 0
           foreach ($e in $programs) {
