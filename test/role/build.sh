@@ -57,12 +57,12 @@ else note python "no python3: the consumer checks did not run"; fi
 
 echo "== AVR: the role layer's cost (ATmega328P, simavr at 16 MHz), six lights on a PCA9685 behind a mux channel"
 if have avr-g++ && have simavr; then
-  for v in 0 1 2 3; do
+  for v in 4 0 1 2 3; do
     if ! avr-g++ -std=gnu++17 -mmcu=atmega328p -Os -DVARIANT=$v "${F[@]}" avr_cost.cpp -o "$W/c$v.elf" 2>"$W/err"; then bad "avr_cost V$v" "$(grep -m1 error "$W/err")"; continue; fi
     sz=$(avr-size -C --mcu=atmega328p "$W/c$v.elf" | awk '/^Program:/{p=$2}/^Data:/{d=$2}END{print p" B flash / "d" B ram"}')
     o=$(timeout 30 simavr -m atmega328p -f 16000000 "$W/c$v.elf" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r' | sed 's/\.$//')
     printf '%s' "$o" | grep -q '^OK' || { bad "avr_cost V$v" "the roles did not reach the device: $(printf '%s' "$o" | head -c 200)"; continue; }
-    name=(Fixed Found Pinned "Found + link + descriptions")
+    name=(Fixed Found Pinned "Found + link + descriptions" "no role layer (the app writes the channels)")
     note "${name[$v]}" "$sz, apply of 6 roles $(printf '%s' "$o" | awk '/^APPLY/{print $2}') cycles, after a scan $(printf '%s' "$o" | awk '/^BIND/{print $2}') cycles"
   done
 else note AVR "no avr-g++/simavr: the cost was not measured"; fi

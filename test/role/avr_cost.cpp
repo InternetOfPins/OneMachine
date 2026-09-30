@@ -3,6 +3,7 @@
 //   VARIANT=0  Fixed endpoints: the device's place written into the type (the floor)
 //   VARIANT=1  Found endpoints: bound when discovery finds the device, a liveness check and W::route per request
 //   VARIANT=2  Pinned endpoints: looked up by path after discovery (pin), then the same per request
+//   VARIANT=4  no role layer at all: the app writes the six channels itself, the same stub (the true floor)
 //   VARIANT=3  Found, plus the consumer side: role::Link and the three descriptions (flash only; not called in the timing)
 // Prints "APPLY <cycles>" (and "BIND <cycles>" for the lookup after a scan) over the UART, then END.
 #include <oneMachine/role/role.h>
@@ -52,7 +53,12 @@ using M = role::Machine<role::Role<L0, K, At<0>>, role::Role<L1, K, At<1>>, role
 
 static M::Command cmd{};
 static M::Report rep{};
+#if VARIANT == 4
+static uint16_t level[6];                                      // the app's own command, and what it wrote
+__attribute__((noinline)) void applyAll() { muxSelect(2); for (uint8_t i = 0; i < 6; i++) Pca::set(0x40, i, level[i]); }
+#else
 __attribute__((noinline)) void applyAll() { M::apply(cmd, rep); }
+#endif
 
 static void scan() {                                           // what discover() leaves on the pilot bus, with found()'s binder call per device
   auto& reg = World::reg; reg.reset(); M::unbind();
@@ -75,12 +81,22 @@ static void putu(uint16_t v) { char b[6]; uint8_t k = 0; do { b[k++] = char('0' 
 int main() {
   UBRR0 = 8; UCSR0B = (1 << TXEN0) | (1 << RXEN0); UCSR0C = 3 << UCSZ00;
   TCCR1A = 0; TCCR1B = 1 << CS10;                              // Timer1 at the CPU clock
+#if VARIANT == 4
+  TCNT1 = 0; { auto& reg = World::reg; reg.reset(); reg.add(0x68, nullptr, discover::rootRow, false); reg.add(0x41, nullptr, discover::rootRow, false);
+    discover::RowId bridge = reg.add(0x70, nullptr, discover::rootRow, false); discover::RowId ch0 = reg.count;
+    for (uint8_t c = 0; c < 4; c++) reg.add(c, nullptr, bridge, true);
+    reg.add(0x40, nullptr, discover::RowId(ch0 + 3), false); reg.add(0x40, nullptr, discover::RowId(ch0 + 2), false); } uint16_t b = TCNT1;
+  level[0] = 100; level[1] = 200; level[2] = 300; level[3] = 400; level[4] = 500; level[5] = 4095;
+  muxAt = 0xFF; TCNT1 = 0; applyAll(); uint16_t a = TCNT1;
+  bool ok = last[5] == 4095;
+#else
   TCNT1 = 0; scan(); M::pin(); uint16_t b = TCNT1;
   state::get<L0>(cmd).level = 100; state::get<L1>(cmd).level = 200; state::get<L2>(cmd).level = 300;
   state::get<L3>(cmd).level = 400; state::get<L4>(cmd).level = 500; state::get<L5>(cmd).level = 4095;
   muxAt = 0xFF; TCNT1 = 0; applyAll(); uint16_t a = TCNT1;
-  puts_("BIND "); putu(b); uputc('\n'); puts_("APPLY "); putu(a); uputc('\n');
   bool ok = state::get<L5>(rep).live && state::get<L5>(rep).level == 4095 && last[5] == 4095;
+#endif
+  puts_("BIND "); putu(b); uputc('\n'); puts_("APPLY "); putu(a); uputc('\n');
   puts_(ok ? "OK\n" : "WRONG\n");
 #if VARIANT == 3
   while (UCSR0A & (1 << RXC0)) link.feed(UDR0, 0);             // keep the link in the image; nothing arrives in the timing run

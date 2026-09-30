@@ -96,15 +96,19 @@ lights to their safe level, switches to their safe state, axes hold where they a
 ATmega328P, avr-g++ 7.3 -Os, simavr at 16 MHz, six lights on a PCA9685 behind a mux channel, the I2C transfer a stub
 (`test/role/avr_cost.cpp`, printed by `test/role/build.sh`):
 
-| Endpoint | Flash | RAM | One apply of 6 roles | After a scan |
+| Build | Flash | RAM | One apply of 6 roles | After a scan |
 |---|---|---|---|---|
-| Fixed at compile time (the floor) | 1452 B | 161 B | 633 cycles | 642 cycles |
-| `Found` | 1786 B | 163 B | 1029 cycles | 1581 cycles |
-| `Pinned` | 2590 B | 173 B | 1125 cycles | 8168 cycles |
-| `Found` + `Link` + the three descriptions | 6994 B | 223 B | | |
+| No role layer: the app writes the six channels itself (the floor) | 992 B | 137 B | 319 cycles | 642 cycles |
+| Roles, endpoints fixed at compile time | 1466 B | 161 B | 633 cycles | 642 cycles |
+| Roles, `Found` (bound at discovery) | 1800 B | 163 B | 1029 cycles | 1581 cycles |
+| Roles, `Pinned` (found by path) | 2604 B | 173 B | 1125 cycles | 8168 cycles |
+| Roles, `Found`, + `Link` and the three descriptions | 6994 B | 223 B | | |
 
-`Found` costs 66 cycles per role per request over a fixed endpoint, about 4 us, against about 135 us for the PCA9685 write
-itself at 400 kHz. The text descriptions are most of the link's flash; they are read once per consumer.
+The balance of roles with `Found` against no role layer: +808 B flash, +26 B RAM, +118 cycles per role per request, about
+7 us at 16 MHz, against about 135 us for the PCA9685 write itself at 400 kHz (5 %), and +939 cycles once per scan. Of that,
+the role layer itself (clamping, the read-back report, `live`, the command and report state) is +474 B and +52 cycles per role;
+binding at discovery and routing is +334 B and +66 cycles per role. The text descriptions are most of the link's flash; they
+are read once per consumer.
 
 ## Stages
 
