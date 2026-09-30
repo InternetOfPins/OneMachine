@@ -232,6 +232,9 @@ its own. The health monitor's full report → quarantine → disconnect sequence
 hardware-verifies the piece a hand test can actually reach -- correct fault attribution and flap tracking. Native
 and AVR builds are both part of every check this library carries forward from its own development.
 
+I2C is the only bus implemented so far, but OneMachine itself is component agnostic: any bus, or any other component,
+that fulfils its contract works within the system. What OneMachine relies on is the contract, not a particular derivation.
+
 ## License
 
 MIT.
