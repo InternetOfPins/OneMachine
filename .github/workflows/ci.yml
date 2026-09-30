@@ -56,7 +56,12 @@ jobs:
             @{ p = "fail/roundF1";     d = "" },
             @{ p = "fail/roundF5";     d = "/DF5_COUNT /DF5_TAP" },
             @{ p = "fail/roundF7";     d = "" },
-            @{ p = "rosCompose/round1"; d = "" }
+            @{ p = "rosCompose/round1"; d = "" },
+            @{ p = "state/check_net";    d = "" },
+            @{ p = "state/check_wire";   d = "" },
+            @{ p = "state/array_check";  d = "" },
+            @{ p = "state/nested_check"; d = "" },
+            @{ p = "state/example";      d = "" }
           )
           $status = 0
           foreach ($e in $programs) {
@@ -109,6 +114,8 @@ jobs:
         run: OneMachine/test/fail/build.sh
       - name: rosCompose
         run: OneMachine/test/rosCompose/build.sh
+      - name: state
+        run: OneMachine/test/state/build.sh
 
   # Every example, built for the Nano.
   examples:

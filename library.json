@@ -1,6 +1,6 @@
 {
   "name": "OneMachine",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "HAPI runtime device discovery and failure handling — a scanned bus becomes compile-time-composed rows; failure edges (retry, recover, reprobe, reply) and a health monitor (flap rate, bus cost, quarantine, disconnect) sit over them, zero-overhead when unused.",
   "keywords": "hapi, discovery, i2c, twi, failure-handling, health-monitor, embedded, avr",
   "repository":
@@ -20,7 +20,7 @@
   "license": "MIT",
   "homepage": "https://github.com/InternetOfPins/OneMachine",
   "dependencies": {
-    "HAPI":    "https://github.com/InternetOfPins/HAPI.git@>=0.7.0",
+    "HAPI":    "https://github.com/InternetOfPins/HAPI.git@>=0.8.0",
     "OneBus":  "https://github.com/InternetOfPins/OneBus.git@^0.1.0"
   },
   "build": {
