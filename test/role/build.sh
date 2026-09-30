@@ -3,7 +3,8 @@
 #   native  g++ and clang++ (+ASan/UBSan): role_check (the test machine through role::Link in one process)
 #   rules   each rule of role::Machine and the kinds is a compile error with its own message (g++, clang++, avr-g++)
 #   python  python/onemachine drives the test machine as a consumer that knows only role names (check.py), across four firmware
-#           variants (rewired, a role added, a role removed); its Schema against test/state's native peers (check_schema.py)
+#           variants (rewired, a role added, a role removed); its Schema against test/state's native peers (check_schema.py);
+#           examples/python's drive.py against that example's host build
 #   AVR     avr-g++ -Os atmega328p in simavr: the role layer's cost per request and per scan, Fixed vs Found vs Pinned, and the link
 # HAPI=<hapi/include> overrides the HAPI checkout used (default: next to this repo).
 cd "$(dirname "$0")"
@@ -51,6 +52,9 @@ if have python3; then
     python3 check.py "$W" > "$W/py.out" 2>&1; rc=$?
     grep -c '^  ok' "$W/py.out" | { read n; [ $rc -eq 0 ] && ok "check.py: $n checks, $(tail -1 "$W/py.out")" || bad "check.py" "$(grep -E 'FAIL|Error' "$W/py.out" | head -5)"; }
   fi
+  if g++ -std=c++17 -O2 -Wall -Wextra -Werror "${F[@]}" ../../examples/python/host/main.cpp -o "$W/exhost" 2>"$W/err"; then
+    python3 ../../examples/python/drive.py --sim "$W/exhost" --check > "$W/ex.out" 2>&1 && ok "examples/python: drive.py against the host build, $(grep -c '^  ok' "$W/ex.out") checks" || bad "examples/python drive.py" "$(grep -E 'FAIL|Error' "$W/ex.out" | head -3)"
+  else bad "examples/python host build" "$(grep -m1 error "$W/err")"; fi
   g++ -std=c++17 -O1 "${F[@]}" -I../state ../state/host_peer.cpp -o "$W/hp" && g++ -std=c++17 -O1 "${F[@]}" -I../state ../state/array_check.cpp -o "$W/ap" &&
     { python3 check_schema.py "$W/hp" "$W/ap" > "$W/sc.out" 2>&1 && ok "check_schema.py: $(grep -c '^ok' "$W/sc.out") checks against the native state peers" || bad "check_schema.py" "$(grep FAIL "$W/sc.out" | head -3)"; }
 else note python "no python3: the consumer checks did not run"; fi

@@ -213,7 +213,12 @@ Four stages, each adding one thing to the last, all built around one real sensor
 - [`examples/health`](examples/health) — a health monitor: correct fault attribution and flap tracking by hand;
   quarantine and disconnect themselves are proven by the test suite, not the hand demo (see its own README).
 
-`test/examples/build.sh` builds all four for the Nano on every change, so they can't silently rot as the library
+And one on the output side, needing only a Nano:
+
+- [`examples/python`](examples/python) — outputs driven by role name from Python over USB serial, or on the host with the
+  pins simulated: the consumer side of `role::`.
+
+`test/examples/build.sh` builds all five for the Nano on every change, so they can't silently rot as the library
 evolves.
 
 ## Status
