@@ -1,6 +1,6 @@
 # OneMachine
 
-Runtime device discovery, failure handling, ROS-shaped composition and typed state for [HAPI](https://github.com/InternetOfPins/HAPI):
+Runtime device discovery, failure handling, ROS-shaped composition, typed state and roles for [HAPI](https://github.com/InternetOfPins/HAPI):
 scan a bus once, get a compile-time-composed table of rows back — one indirect call in `pump()`, no per-device virtual
 dispatch, no dynamic allocation. Failure edges (retry, recover, reprobe) and a health monitor (flap rate, bus cost,
 quarantine, disconnect) compose over those rows the same way, at zero cost when not chosen.
@@ -193,6 +193,18 @@ state::read(peer, frame, sizeof frame);          // Ok, or BadHash / BadLength /
   (`test/state/build.sh` compares them on an ATmega328P). The frame an AVR writes is byte-equal to the host's, and to one a
   Python implementation builds from the description alone.
 
+## Roles: `role::`
+
+What an output is for, declared by the machine: `role::Role<Tag, Kind, Endpoint>` names it ("white"), gives its kind
+(`Light<4000>`) and says where it is, known only to the device. A consumer uses role names and nothing else; the device binds
+each role when discovery finds its device (`role::Found`, by driver type, address and `discover::Behind`) and routes every
+request itself. `role::Link` carries the descriptions and the command and report frames over any byte stream, and
+[`python/onemachine`](python/onemachine) is the consumer side: `m.cmd.white.level = 3000; m.push()`.
+`role::Call` gives the same protocol a C ABI (`onemachine_call`) for a consumer in the same process, such as Python through ctypes or Rust
+over FFI. Rewired firmware with the same
+roles needs nothing from the consumer; a role that is gone is reported, never retargeted. See [`docs/role.md`](docs/role.md);
+`test/role/build.sh` checks it natively, from Python across four firmware variants, and measures it on an ATmega328P.
+
 ## Examples
 
 Four stages, each adding one thing to the last, all built around one real sensor (a GY-521/MPU6050 on a Nano):
@@ -203,7 +215,12 @@ Four stages, each adding one thing to the last, all built around one real sensor
 - [`examples/health`](examples/health) — a health monitor: correct fault attribution and flap tracking by hand;
   quarantine and disconnect themselves are proven by the test suite, not the hand demo (see its own README).
 
-`test/examples/build.sh` builds all four for the Nano on every change, so they can't silently rot as the library
+And one on the output side, needing only a Nano:
+
+- [`examples/python`](examples/python) — outputs driven by role name from Python over USB serial, or on the host with the
+  pins simulated: the consumer side of `role::`.
+
+`test/examples/build.sh` builds all five for the Nano on every change, so they can't silently rot as the library
 evolves.
 
 ## Status
