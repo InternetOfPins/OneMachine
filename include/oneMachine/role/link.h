@@ -6,11 +6,15 @@
 //   op  'm'  the machine description (role/face.h)          'r'  the report description     'c'  the command description
 //       'g'  a report frame (state::write of the report)     's'  a command frame: status is state::Status of state::read into the staged
 //                                                                  command; Ok stages it for the next take() and arms the quiet deadline
+//       when the machine has tuned roles (role::Tuned):
+//       'T'  the tuning description  'G'  a tuning frame (the current values)  'S'  a tuning frame: BadHash/BadLength as for 's', BadValue
+//                                                                  when a value is outside the firmware's limits (nothing changes); Ok
+//                                                                  takes effect at once, and the next take() re-applies the command
 //   anything else goes to App::op(op, payload, n) -> a status (no payload), or Unknown when the app has no such op
 //
 // role::Link<M, Out, App>: M a role::Machine, Out `static void put(uint8_t)`, App optional. feed(byte, now) as bytes arrive, then at the
 // cycle boundary take(cmd) (a new command, if one was accepted) and quiet(now) (true once, when no command was accepted for QuietMs:
-// the app applies M::safe then). The request buffer is the command frame size (Cap); a longer request is read to its end and refused.
+// the app applies M::safe then). The request buffer is the command frame size, or the tuning frame's when larger (Cap); a longer request is read to its end and refused.
 #include "face.h"
 #include <oneMachine/state/wire.h>
 #include <oneMachine/fail/deadline.h>
@@ -19,13 +23,19 @@ namespace role {
   constexpr uint8_t LinkOk = 0, LinkBadHash = 1, LinkBadLength = 2, LinkBadValue = 3, LinkUnknown = 0x80, LinkTooLong = 0x81;
   struct NoApp { static int op(uint8_t, const uint8_t*, uint16_t) { return -1; } };
 
-  template<class M, class Out, class App = NoApp, unsigned Cap = state::wire_size<typename M::Command>()>
+  // the longest request a link reads: a command frame, or a tuning frame when the machine has tuned roles
+  template<class M> constexpr unsigned link_cap() {
+    unsigned c = state::wire_size<typename M::Command>();
+    if constexpr (M::tunable) { unsigned t = state::wire_size<typename M::Tuning>(); return t > c ? t : c; } else return c;
+  }
+
+  template<class M, class Out, class App = NoApp, unsigned Cap = link_cap<M>()>
   struct Link {
     using Command = typename M::Command; using Report = typename M::Report;
     const Report& report;
     uint32_t quietMs;
     Command staged{};
-    bool fresh = false;
+    bool fresh = false, retuned = false;
     fail::Deadline silence{};
     uint8_t phase = 0, op = 0; uint16_t len = 0, got = 0; uint8_t buf[Cap]{};
 
@@ -40,7 +50,8 @@ namespace role {
       }
       phase = 0; request(now);
     }
-    bool take(Command& c) { if (!fresh) return false; c = staged; fresh = false; return true; }
+    // true when the command must be applied again: a new one (copied into c), or new tuning (c unchanged)
+    bool take(Command& c) { bool r = fresh || retuned; if (fresh) c = staged; fresh = retuned = false; return r; }
     bool quiet(uint32_t now) { if (!silence.due(now)) return false; silence.disarm(); return true; }
 
   private:
@@ -60,8 +71,20 @@ namespace role {
           if (st == state::Status::Ok) { fresh = true; silence.arm(now, quietMs); }
           head(uint8_t(st), 0); return;
         }
-        default: { int st = App::op(op, buf, len); head(st < 0 ? LinkUnknown : uint8_t(st), 0); return; }
+        case 'T': if constexpr (M::tunable) { text([](Put& p) { state::describe<typename M::Tuning>(p); }); return; } else break;
+        case 'G': if constexpr (M::tunable) {
+          uint8_t f[state::wire_size<typename M::Tuning>()]; state::write(M::tuning, f); head(LinkOk, sizeof f); for (uint8_t b : f) Out::put(b); return;
+        } else break;
+        case 'S': if constexpr (M::tunable) {
+          typename M::Tuning t = M::tuning;
+          state::Status st = state::read(t, buf, len);
+          if (st == state::Status::Ok && !M::valid(t)) st = state::Status::BadValue;
+          if (st == state::Status::Ok) { M::tuning = t; retuned = true; }
+          head(uint8_t(st), 0); return;
+        } else break;
+        default: break;
       }
+      { int st = App::op(op, buf, len); head(st < 0 ? LinkUnknown : uint8_t(st), 0); }
     }
   };
 }

@@ -36,7 +36,25 @@ int main() {
   check("  and the pins hold it", role::SimPwm<9, 255>::v == 200 && role::SimPin<13>::v);
   onemachine_cycle(200);
   check("quiet for 100 ms: safe command at the next cycle", role::SimPwm<9, 255>::v == 0 && !role::SimPin<13>::v);
-  check("unknown op", onemachine_call('?', nullptr, 0, out, sizeof out, 300) == 3 && out[0] == role::LinkUnknown);
+  // the lamp is role::Tuned<Light<200>>: its max can be lowered at run time, never raised past 200
+  n = onemachine_call('T', nullptr, 0, out, sizeof out, 300);
+  check("T: the tuning description", n > 3 && out[0] == 0 && strstr(reinterpret_cast<char*>(out + 3), "lamp/max u16") != nullptr);
+  M::Tuning t = M::tuning; uint8_t tf[state::wire_size<M::Tuning>()];
+  n = onemachine_call('G', nullptr, 0, out, sizeof out, 300);
+  check("G: the current tuning, the firmware's values", n == int32_t(3 + sizeof tf) && state::read(t, out + 3, sizeof tf) == state::Status::Ok && state::get<Lamp>(t).max == 200);
+  n = onemachine_call('s', f, sizeof f, small, 3, 300);             // lamp 250 again
+  state::get<Lamp>(t).max = 120; state::write(t, tf);
+  n = onemachine_call('S', tf, sizeof tf, small, 3, 300);
+  check("S: max 120 accepted", n == 3 && small[0] == 0 && state::get<Lamp>(M::tuning).max == 120);
+  onemachine_cycle(310);
+  check("  the command is applied again under it: lamp 120", role::SimPwm<9, 255>::v == 120);
+  state::get<Lamp>(t).max = 201; state::write(t, tf);
+  n = onemachine_call('S', tf, sizeof tf, small, 3, 320);
+  check("S: max 201, above the firmware's 200: BadValue, nothing changes", n == 3 && small[0] == role::LinkBadValue && state::get<Lamp>(M::tuning).max == 120);
+  state::get<Lamp>(t).max = 100; state::get<Lamp>(t).safe = 101; state::write(t, tf);
+  n = onemachine_call('S', tf, sizeof tf, small, 3, 320);
+  check("S: safe above max: BadValue", n == 3 && small[0] == role::LinkBadValue);
+  check("unknown op", onemachine_call('?', nullptr, 0, out, sizeof out, 330) == 3 && out[0] == role::LinkUnknown);
   printf("%d failed\n", fails);
   return fails ? 1 : 0;
 }

@@ -6,7 +6,7 @@
     --check                                exit 1 unless every step behaves (what CI runs against --sim)"""
 import os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'python'))
-from onemachine import Machine, StreamLink
+from onemachine import Machine, StreamLink, OutOfLimits
 
 def open_link(args):
     if args[0] == '--sim': return StreamLink.popen([args[1]])
@@ -39,6 +39,17 @@ def main():
         m.cmd.lamp.level = level; m.push(); time.sleep(0.1)
         r = m.poll(); print('  lamp asked %3d, is %3d%s' % (level, r.lamp.level, ' (clamped)' if r.lamp.clamped else ''))
     expect('lamp clamped to its max', (r.lamp.level, r.lamp.clamped) == (200, True))
+
+    if m.roles['lamp'].tuned:                                # change a parameter at run time: the lamp's max, inside the firmware's 200
+        print('lamp tuning now:', m.tune.lamp, ' firmware limits:', m.roles['lamp'].params)
+        m.tune.lamp.max = 120; m.retune(); time.sleep(0.1)  # the command (250) is applied again under the new max
+        r = m.poll(); print('  lamp max 120: is %d%s' % (r.lamp.level, ' (clamped)' if r.lamp.clamped else ''))
+        expect('lamp clamped to the tuned max', (r.lamp.level, r.lamp.clamped) == (120, True))
+        try:
+            m.tune.lamp.max = 255; m.retune(); refused = False
+        except OutOfLimits as e: refused = True; print('  max 255 refused:', e)
+        expect('a max above the firmware limit is refused, nothing changes', refused and m.tune.lamp.max == 120)
+        m.tune.lamp.max = 200; m.retune()
 
     if check:                                                # the supervisor goes quiet: every role to its safe command
         m.cmd.led.on = True; m.push(); time.sleep(0.1)

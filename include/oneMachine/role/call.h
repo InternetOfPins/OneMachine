@@ -24,7 +24,7 @@ namespace role {
     static void put(uint8_t b) { if (n < cap) p[n] = b; ++n; }
   };
 
-  template<class M, class App = NoApp, unsigned Cap = state::wire_size<typename M::Command>()>
+  template<class M, class App = NoApp, unsigned Cap = link_cap<M>()>
   struct Call {
     using Out = BufOut<Call>;
     typename M::Command cmd{};

@@ -21,14 +21,31 @@
 //   sense(rep)            refresh the report without writing (every cycle)
 //   safe(cmd, rep)        replace the command with every kind's safe one (the supervisor went quiet); apply it after
 //   describe(put)         the machine description (role/face.h)
+//   Tuning, tuning, valid  the roles whose kind is role::Tuned<Kind>: their parameters as a state composition (one layer per tuned role,
+//                         the kind's Tune fields), the machine's current values (one per image, starting at the template arguments),
+//                         and the check that every value stays inside what the firmware allows. A machine without a tuned role has
+//                         an empty Tuning and pays nothing. apply, sense and safe use the current values of a tuned role.
 // Rules, compile errors: two roles on one endpoint; two roles with one name (state.h's own rule on the layers).
 #include <oneMachine/state/state.h>
 
 namespace role {
   struct RoleItem {};                                          // what Machine filters roles by (hapi::TagIs)
+  struct TunedItem {};                                         // ... and the tuned ones
+
+  // Tuned<Kind>: the same kind, with its parameters changeable at run time (over the link: role/link.h ops T, G, S), inside the template
+  // arguments, which stay the firmware's limits. In RAM: a reset goes back to the template arguments.
+  template<class K> struct Tuned : K { using base = K; };
+  template<class K> struct IsTuned : std::false_type {};
+  template<class K> struct IsTuned<Tuned<K>> : std::true_type {};
+  template<class K> struct KindOf { using type = K; };
+  template<class K> struct KindOf<Tuned<K>> { using type = K; };
+  struct NotTuned {};
 
   template<class Tag, class Kind, class Endpoint>
-  struct Role : RoleItem { using tag = Tag; using kind = Kind; using endpoint = Endpoint; };
+  struct Role : RoleItem, std::conditional_t<IsTuned<Kind>::value, TunedItem, NotTuned> {
+    using tag = Tag; using kind = typename KindOf<Kind>::type; using endpoint = Endpoint;
+    static constexpr bool tuned = IsTuned<Kind>::value;
+  };
 
   // the report slot of a role: its kind's fields, then `live`
   template<class K> struct Reported : K::Report {
@@ -39,9 +56,11 @@ namespace role {
 
   template<class R> using CommandLayer = state::Layer<typename R::tag, typename R::kind::Command>;
   template<class R> using ReportLayer  = state::Layer<typename R::tag, Reported<typename R::kind>>;
+  template<class R> using TuneLayer    = state::Layer<typename R::tag, typename R::kind::Tune>;
   template<class... LL> using StateOf  = typename hapi::APIOf<state::API, LL...>::Res;
 
   template<class I> struct IsRole : std::bool_constant<std::is_base_of<RoleItem, I>::value> {};
+  template<class I> struct IsTunedRole : std::bool_constant<std::is_base_of<TunedItem, I>::value> {};
 
   // what an endpoint may declare, each optional: pin(); wants<Impl> with bind<Impl>(row); unbind(); release(row)
   template<class E, class = void> struct HasPin : std::false_type {};
@@ -75,6 +94,11 @@ namespace role {
     using Roles   = hapi::Eval<hapi::Filter<hapi::TagIs<RoleItem>>, hapi::Chain<Items...>>;
     using Command = typename Roles::template Map<CommandLayer>::template Build<StateOf>;
     using Report  = typename Roles::template Map<ReportLayer>::template Build<StateOf>;
+    using TunedRoles = hapi::Eval<hapi::Filter<hapi::TagIs<TunedItem>>, hapi::Chain<Items...>>;
+    using Tuning  = typename TunedRoles::template Map<TuneLayer>::template Build<StateOf>;
+    static constexpr bool tunable = (IsTunedRole<Items>::value || ... || false);
+    static inline Tuning tuning{};
+    static bool valid(const Tuning& t) { return (validOne<Items>(t) && ... && true); }
 
     template<class Impl> static constexpr bool wants = AnyWants<Impl, Items...>::value;
     template<class Impl> static void bind(uint8_t row, Impl*) { (bindOne<Items, Impl>(row), ...); }
@@ -96,18 +120,29 @@ namespace role {
       if constexpr (IsRole<I>::value) {
         using T = typename I::tag; auto& rep = state::get<T>(r);
         rep.live = I::endpoint::live();
-        if (rep.live) I::kind::template apply<typename I::endpoint>(state::get<T>(c), rep);
+        if (!rep.live) return;
+        if constexpr (IsTunedRole<I>::value) I::kind::template apply<typename I::endpoint>(state::get<T>(c), rep, state::get<T>(tuning));
+        else I::kind::template apply<typename I::endpoint>(state::get<T>(c), rep);
       }
     }
     template<class I> static void senseOne(Report& r) {
       if constexpr (IsRole<I>::value) {
         using T = typename I::tag; auto& rep = state::get<T>(r);
         rep.live = I::endpoint::live();
-        if (rep.live) I::kind::template sense<typename I::endpoint>(rep);
+        if (!rep.live) return;
+        if constexpr (IsTunedRole<I>::value) I::kind::template sense<typename I::endpoint>(rep, state::get<T>(tuning));
+        else I::kind::template sense<typename I::endpoint>(rep);
       }
     }
     template<class I> static void safeOne(Command& c, const Report& r) {
-      if constexpr (IsRole<I>::value) { using T = typename I::tag; I::kind::safe(state::get<T>(c), state::get<T>(r)); }
+      if constexpr (IsRole<I>::value) {
+        using T = typename I::tag;
+        if constexpr (IsTunedRole<I>::value) I::kind::safe(state::get<T>(c), state::get<T>(r), state::get<T>(tuning));
+        else I::kind::safe(state::get<T>(c), state::get<T>(r));
+      }
+    }
+    template<class I> static bool validOne([[maybe_unused]] const Tuning& t) {
+      if constexpr (IsTunedRole<I>::value) return I::kind::valid(state::get<typename I::tag>(t)); else return true;
     }
   };
 }
