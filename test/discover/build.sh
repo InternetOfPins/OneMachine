@@ -9,4 +9,6 @@ echo; echo "################ Round 3 ################"
 ./build_r3.sh || rc=1
 echo; echo "################ Round 3b ################"
 ./build_r3b.sh || rc=1
+echo; echo "################ SPI round 1 ################"
+./build_spi1.sh || rc=1
 exit $rc

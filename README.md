@@ -68,6 +68,10 @@ App::pump();       // one poll per alive row, one indirect call total
   if one does).
 - A driver's `Produces` (a `Chain` of capability tags) decides whether `pump()` calls its `read()` at all; a driver
   that produces nothing (a display) opts in with `static constexpr bool polled = true`.
+- On SPI there is no address to scan: the bus declares its chip selects statically (`oneBus::SpiSlots`), and
+  `discover::SpiScan` reads each candidate driver's ID register on every slot, at the driver's own clock and mode
+  (`SpiDriverBase`, `IdSet`). `Fixed<Slot, D>` gives a device with no ID register its row without any traffic. See
+  [`examples/spi`](examples/spi).
 - A capability fan-out is a plain static consumer list: a driver `emit`s a `Sample<Cap>`, every consumer whose
   `Accepts` names `Cap` gets it, at compile time.
 
@@ -220,8 +224,13 @@ And one on the output side, needing only a Nano:
 - [`examples/python`](examples/python) — outputs driven by role name from Python over USB serial, or on the host with the
   pins simulated: the consumer side of `role::`.
 
-`test/examples/build.sh` builds all five for the Nano on every change, so they can't silently rot as the library
-evolves.
+And one on a second bus:
+
+- [`examples/spi`](examples/spi) — an RC522 RFID reader found on an SPI bus with statically declared chip selects
+  (`discover::SpiScan`), next to a BMP280 found on I2C, on a Wemos D1 mini.
+
+`test/examples/build.sh` builds every example for the board its `platformio.ini` names on every change, so they can't
+silently rot as the library evolves.
 
 ## Status
 
