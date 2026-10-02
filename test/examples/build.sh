@@ -22,6 +22,10 @@ for dir in ../../examples/*/; do
     else
       bad "examples/$name does not build for $env"
       echo "$out" | grep -E 'error:|Error' | sed 's/^/  /'
+      # on GitHub Actions, the first errors also as annotations: they show on the check without the job log
+      if [ -n "${GITHUB_ACTIONS:-}" ]; then
+        echo "$out" | grep -E 'error:|Error' | head -10 | while IFS= read -r line; do echo "::error title=examples/$name ($env)::$line"; done
+      fi
     fi
   done
 done
