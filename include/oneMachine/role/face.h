@@ -6,7 +6,8 @@
 //   hash 1f2e3d4c                   FNV-1a over the bytes of every line below except the `at` lines
 //   ref https://...                 role/ref.h, in item order
 //   role x axis                     one per role: name, kind
-//   param x steps_mm 80             one per kind parameter, signed decimal
+//   param x steps_mm 80             one per kind parameter, signed decimal: the firmware's value (for a tuned role, its limit)
+//   tune x                          the role is role::Tuned: its parameters' current values are the link's tuning state (ops T, G, S)
 //   at x sim.stepdir(0)             where the device routes it: for a person reading the description, not for a consumer.
 //                                   Not in the hash: rewiring changes nothing a consumer depends on.
 #include <oneMachine/state/face.h>
@@ -37,6 +38,7 @@ namespace role {
         state::Name r = I::tag::name();
         ONEMACHINE_ROLE_TEXT(kRole, "role "); ONEMACHINE_ROLE_PUT(put, kRole); state::put_name(put, r); put(' '); state::put_name(put, I::kind::name()); put('\n');
         Params<P> ps{put, r}; I::kind::params(ps);
+        if constexpr (IsTunedRole<I>::value) { ONEMACHINE_ROLE_TEXT(kTune, "tune "); ONEMACHINE_ROLE_PUT(put, kTune); state::put_name(put, r); put('\n'); }
         if (at) { ONEMACHINE_ROLE_TEXT(kAt, "at "); ONEMACHINE_ROLE_PUT(put, kAt); state::put_name(put, r); put(' '); I::endpoint::where(put); put('\n'); }
       } else if constexpr (IsRef<I>::value) {
         using T = typename Shape<I>::text; ONEMACHINE_ROLE_TEXT(kRef, "ref "); ONEMACHINE_ROLE_PUT(put, kRef); state::put_name(put, T::name()); put('\n');

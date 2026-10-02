@@ -206,7 +206,8 @@ request itself. `role::Link` carries the descriptions and the command and report
 [`python/onemachine`](python/onemachine) is the consumer side: `m.cmd.white.level = 3000; m.push()`.
 `role::Call` gives the same protocol a C ABI (`onemachine_call`) for a consumer in the same process, such as Python through ctypes or Rust
 over FFI. Rewired firmware with the same
-roles needs nothing from the consumer; a role that is gone is reported, never retargeted. See [`docs/role.md`](docs/role.md);
+roles needs nothing from the consumer; a role that is gone is reported, never retargeted. A role declared `role::Tuned` lets the
+consumer change its parameters at run time, inside the firmware's limits (`m.tune.lamp.max = 120; m.retune()`). See [`docs/role.md`](docs/role.md);
 `test/role/build.sh` checks it natively, from Python across four firmware variants, and measures it on an ATmega328P.
 
 ## Examples

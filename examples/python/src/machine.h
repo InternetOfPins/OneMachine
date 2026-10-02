@@ -14,4 +14,6 @@ template<class LedAt, class LampAt>
 using MachineOf = role::Machine<
   role::Ref<Doc>,
   role::Role<Led,  role::Switch<false>, LedAt>,
-  role::Role<Lamp, role::Light<200>, LampAt>>;     // at most 200 of 255: the lamp's LED is never driven at full duty
+  role::Role<Lamp, role::Tuned<role::Light<200>>, LampAt>>;   // at most 200 of 255: the lamp's LED is never driven at full duty.
+                                                                // Tuned: a consumer may lower its max and safe level at run time,
+                                                                // never above 200 (drive.py does)

@@ -6,7 +6,8 @@
 #   python  python/onemachine drives the test machine as a consumer that knows only role names (check.py), across four firmware
 #           variants (rewired, a role added, a role removed), over a pipe and in-process through ctypes (CtypesLink); its Schema against test/state's native peers (check_schema.py);
 #           examples/python's drive.py against that example's host build
-#   AVR     avr-g++ -Os atmega328p in simavr: the role layer's cost per request and per scan, Fixed vs Found vs Pinned, and the link
+#   AVR     avr-g++ -Os atmega328p in simavr: the role layer's cost per request and per scan, Fixed vs Found vs Pinned, the link, and
+#           role::Tuned (run-time parameters)
 # HAPI=<hapi/include> overrides the HAPI checkout used (default: next to this repo).
 cd "$(dirname "$0")"
 H=$(realpath "${HAPI:-../../../HAPI/include}")
@@ -69,12 +70,12 @@ else note python "no python3: the consumer checks did not run"; fi
 
 echo "== AVR: the role layer's cost (ATmega328P, simavr at 16 MHz), six lights on a PCA9685 behind a mux channel"
 if have avr-g++ && have simavr; then
-  for v in 4 0 1 2 3; do
+  for v in 4 0 1 2 3 5 6; do
     if ! avr-g++ -std=gnu++17 -mmcu=atmega328p -Os -DVARIANT=$v "${F[@]}" avr_cost.cpp -o "$W/c$v.elf" 2>"$W/err"; then bad "avr_cost V$v" "$(grep -m1 error "$W/err")"; continue; fi
     sz=$(avr-size -C --mcu=atmega328p "$W/c$v.elf" | awk '/^Program:/{p=$2}/^Data:/{d=$2}END{print p" B flash / "d" B ram"}')
     o=$(timeout 30 simavr -m atmega328p -f 16000000 "$W/c$v.elf" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r' | sed 's/\.$//')
     printf '%s' "$o" | grep -q '^OK' || { bad "avr_cost V$v" "the roles did not reach the device: $(printf '%s' "$o" | head -c 200)"; continue; }
-    name=(Fixed Found Pinned "Found + link + descriptions" "no role layer (the app writes the channels)")
+    name=(Fixed Found Pinned "Found + link + descriptions" "no role layer (the app writes the channels)" "Found, tuned" "Found, tuned + link + descriptions")
     note "${name[$v]}" "$sz, apply of 6 roles $(printf '%s' "$o" | awk '/^APPLY/{print $2}') cycles, after a scan $(printf '%s' "$o" | awk '/^BIND/{print $2}') cycles"
   done
 else note AVR "no avr-g++/simavr: the cost was not measured"; fi

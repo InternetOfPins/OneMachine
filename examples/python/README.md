@@ -41,9 +41,16 @@ refs: https://github.com/InternetOfPins/OneMachine/tree/main/examples/python
   lamp asked 200, is 200
   lamp asked 250, is 200 (clamped)
   ok    lamp clamped to its max
+lamp tuning now: {'max': 200, 'safe': 0}  firmware limits: {'max': 200, 'safe': 0}
+  lamp max 120: is 120 (clamped)
+  ok    lamp clamped to the tuned max
+  max 255 refused: tuning {'lamp': {'max': 255, 'safe': 0}} is outside the firmware limits {'lamp': {'max': 200, 'safe': 0}}
+  ok    a max above the firmware limit is refused, nothing changes
 ```
 
-The LED blinks three times and the lamp steps up in brightness, stopping at 200. With `--sim`, `at` shows the simulated
+The LED blinks three times and the lamp steps up in brightness, stopping at 200. The lamp is `role::Tuned`, so the script
+then lowers its max to 120 at run time (the lamp dims to 120 at once) and is refused when it asks for more than the
+firmware's 200. It sets 200 back before it ends; a reset of the Nano does that too, since tuning lives in RAM. With `--sim`, `at` shows the simulated
 pins (`sim.pin(13)`, `sim.pwm(9)`). Stop sending for 2 seconds and the Nano puts both roles to their safe command (off):
 `python3 drive.py --sim host/machine --check` checks that too.
 
@@ -51,6 +58,8 @@ pins (`sim.pin(13)`, `sim.pwm(9)`). Stop sending for 2 seconds and the Nano puts
 
 - The consumer names roles only. Where a role is lives in the firmware (`src/main.cpp`: `MachineOf<Pin<13>, Pwm<9>>`); move
   the lamp to pin 10 and `drive.py` does not change.
+- A parameter can change at run time without the consumer knowing anything new: the tuning is one more state composition
+  in the same description, with the firmware's limits checked on the device.
 - The description, the frames and their hashes are the only contract between the two sides: the Python side has no C++ in it
   and no generated code.
 - Limits are the device's: the lamp's max is enforced on the Nano, and the report tells the consumer when it clamped.

@@ -7,6 +7,8 @@
     m.cmd.x.target_um = 150000                     # the command, by role, range-checked
     m.push()                                       # sent; the device applies it at its next cycle boundary
     m.poll().x.pos_um                              # the report; `live` is False for a role whose device is not there
+    m.roles['x'].tuned                             # a role::Tuned role: its parameters can change at run time
+    m.tune.x.max_um = 200000; m.retune()           # within the firmware's limits (the `param` values); outside them: OutOfLimits
 
 Where a role is (which device, which bus, which channel) is the device's business: the `at` lines are shown to people (m.where),
 never used here. A consumer only reconfigures when the device's roles change: push() and poll() re-read the descriptions on BadHash
@@ -19,6 +21,7 @@ OK, BAD_HASH, BAD_LENGTH, BAD_VALUE, UNKNOWN, TOO_LONG = 0, 1, 2, 3, 0x80, 0x81
 
 class LinkError(IOError): pass
 class RoleChanged(SchemaError): pass
+class OutOfLimits(ValueError): pass
 
 class StreamLink:
     """role/link.h over a byte stream: request op, u16 length, payload; response status, u16 length, payload."""
@@ -76,9 +79,19 @@ def _fnv(h, data):
     for b in data: h = ((h ^ b) * 16777619) & 0xFFFFFFFF
     return h
 
+def _carry(old, schema, new):
+    """new, with the values of old copied in wherever old has the same layer and field (a description re-read keeps what still exists)."""
+    if old is not None:
+        for l in schema.layers:
+            if not hasattr(old, l.name): continue
+            for f in l.fields:
+                v = getattr(getattr(old, l.name), f.name, None)
+                if v is not None: getattr(new, l.name)._v[f.name] = v
+    return new
+
 class RoleInfo:
-    def __init__(self, name, kind): self.name, self.kind, self.params = name, kind, {}
-    def __repr__(self): return 'Role(%s %s %r)' % (self.name, self.kind, self.params)
+    def __init__(self, name, kind): self.name, self.kind, self.params, self.tuned = name, kind, {}, False
+    def __repr__(self): return 'Role(%s %s %r%s)' % (self.name, self.kind, self.params, ' tuned' if self.tuned else '')
 
 class Description:
     """The machine description (role/face.h): refs, roles with kind and parameters, and where each is (for people only)."""
@@ -99,6 +112,7 @@ class Description:
                 name, kind = rest.split(' '); self.roles[name] = RoleInfo(name, kind)
             elif word == 'param':
                 role, key, value = rest.split(' '); self.roles[role].params[key] = int(value)
+            elif word == 'tune': self.roles[rest].tuned = True
             else: raise SchemaError('unknown line %r' % l)
         if h != self.hash: raise SchemaError('description says hash %08x, its lines hash to %08x' % (self.hash, h))
 
@@ -126,15 +140,15 @@ class Machine:
                 raise RoleChanged('roles this consumer drives changed on the device: %s' %
                                   ', '.join(['%s gone' % r for r in gone] + ['%s is now a %s' % (r, desc.roles[r].kind) for r in rekind]))
         self.description, self.report_schema, self.command_schema = desc, report, command
-        cmd = command.zero(on_set=lambda role, field: self.written.add(role))
-        if old is not None:
-            for l in command.layers:
-                if not hasattr(old, l.name): continue
-                for f in l.fields:
-                    v = getattr(getattr(old, l.name), f.name, None)
-                    if v is not None: getattr(cmd, l.name)._v[f.name] = v
-        self.cmd = cmd
+        self.cmd = _carry(old, command, command.zero(on_set=lambda role, field: self.written.add(role)))
         self.report = None
+        # tuned roles: the device's current values, then whatever this consumer had changed and not yet sent, by role and field name
+        old_tune, self.tune_schema, self.tune = getattr(self, 'tune', None), None, None
+        if any(r.tuned for r in desc.roles.values()):
+            self.tune_schema = Schema.parse(self._text('T'))
+            st, data = self.link.call('G')
+            if st != OK: raise LinkError('tuning get: status %d' % st)
+            self.tune = _carry(old_tune, self.tune_schema, self.tune_schema.decode(data))
 
     def relink(self, link):
         """Talk to the machine over another link (a reconnection, a reboot, new firmware). Nothing is re-read until the device says
@@ -156,6 +170,21 @@ class Machine:
             if st == BAD_HASH and attempt == 0: self.refresh(); continue
             raise LinkError('set: status %d' % st)
 
+    def retune(self):
+        """Send the tuning (m.tune). It takes effect at once on the device, and the current command is applied again under it. A value
+        outside the firmware's limits changes nothing on the device: OutOfLimits, and m.tune is read back from the device."""
+        if self.tune is None: raise LinkError('this machine has no tuned role')
+        for attempt in (0, 1):
+            st, _ = self.link.call('S', self.tune_schema.encode(self.tune))
+            if st == OK: return
+            if st == BAD_HASH and attempt == 0: self.refresh(); continue
+            if st == BAD_VALUE:
+                bad = self.tune.to_dict()
+                st2, data = self.link.call('G')
+                if st2 == OK: self.tune = self.tune_schema.decode(data)
+                raise OutOfLimits('tuning %r is outside the firmware limits %r' % (bad, {n: r.params for n, r in self.roles.items() if r.tuned}))
+            raise LinkError('tuning set: status %d' % st)
+
     def poll(self):
         """Read the report. On a frame of another schema, re-read the descriptions once and read again."""
         for attempt in (0, 1):
@@ -168,5 +197,5 @@ class Machine:
                 self.refresh()
 
     def __getattr__(self, name):                   # m.x is the command of role x
-        if name in ('cmd', 'description') or name.startswith('_'): raise AttributeError(name)
+        if name in ('cmd', 'description', 'tune', 'tune_schema') or name.startswith('_'): raise AttributeError(name)
         return getattr(self.cmd, name)

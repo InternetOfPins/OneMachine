@@ -5,12 +5,14 @@
 //   VARIANT=2  Pinned endpoints: looked up by path after discovery (pin), then the same per request
 //   VARIANT=4  no role layer at all: the app writes the six channels itself, the same stub (the true floor)
 //   VARIANT=3  Found, plus the consumer side: role::Link and the three descriptions (flash only; not called in the timing)
+//   VARIANT=5  Found, the six lights role::Tuned: max and safe read from the run-time tuning on every apply
+//   VARIANT=6  5 plus role::Link with the tuning ops (T, G, S) and the four descriptions
 // Prints "APPLY <cycles>" (and "BIND <cycles>" for the lookup after a scan) over the UART, then END.
 #include <oneMachine/role/role.h>
 #include <oneMachine/role/kinds.h>
 #include <oneMachine/role/found.h>
 #include <oneMachine/role/route.h>
-#if VARIANT == 3
+#if VARIANT == 3 || VARIANT == 6
 #include <oneMachine/role/link.h>
 #endif
 #include <avr/io.h>
@@ -47,7 +49,11 @@ template<uint8_t U> using At = role::Found<World, Pca, 0x40, discover::Behind<0x
 #endif
 struct L0 { ONEMACHINE_STATE_NAME(name, "l0"); }; struct L1 { ONEMACHINE_STATE_NAME(name, "l1"); }; struct L2 { ONEMACHINE_STATE_NAME(name, "l2"); };
 struct L3 { ONEMACHINE_STATE_NAME(name, "l3"); }; struct L4 { ONEMACHINE_STATE_NAME(name, "l4"); }; struct L5 { ONEMACHINE_STATE_NAME(name, "l5"); };
+#if VARIANT >= 5
+using K = role::Tuned<role::Light<4095>>;
+#else
 using K = role::Light<4095>;
+#endif
 using M = role::Machine<role::Role<L0, K, At<0>>, role::Role<L1, K, At<1>>, role::Role<L2, K, At<2>>,
                         role::Role<L3, K, At<3>>, role::Role<L4, K, At<4>>, role::Role<L5, K, At<5>>>;
 
@@ -70,7 +76,7 @@ static void scan() {                                           // what discover(
   M::bind(reg.add(0x40, nullptr, discover::RowId(ch0 + 2), false), (Pca*)nullptr);   // ours
 }
 
-#if VARIANT == 3
+#if VARIANT == 3 || VARIANT == 6
 struct Out { static void put(uint8_t b) { while (!(UCSR0A & (1 << UDRE0))) {} UDR0 = b; } };
 static role::Link<M, Out> link(rep, 500);
 #endif
@@ -98,7 +104,7 @@ int main() {
 #endif
   puts_("BIND "); putu(b); uputc('\n'); puts_("APPLY "); putu(a); uputc('\n');
   puts_(ok ? "OK\n" : "WRONG\n");
-#if VARIANT == 3
+#if VARIANT == 3 || VARIANT == 6
   while (UCSR0A & (1 << RXC0)) link.feed(UDR0, 0);             // keep the link in the image; nothing arrives in the timing run
 #endif
   puts_("END\n");
