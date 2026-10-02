@@ -50,6 +50,7 @@ jobs:
             @{ p = "discover/round2";  d = "/DR2_NO_MQTT" },
             @{ p = "discover/round3";  d = "" },
             @{ p = "discover/round3b"; d = "" },
+            @{ p = "discover/spi1";    d = "" },
             @{ p = "fail/unit_f1";     d = "" },
             @{ p = "fail/unit_f2";     d = "" },
             @{ p = "fail/unit_f3";     d = "" },
@@ -102,10 +103,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: OneMachine
-      - name: Clone HAPI and OneBus
+      - name: Clone HAPI, OneBus and OneChip
         run: |
           git clone --depth 1 $ORG/HAPI.git HAPI
           git clone --depth 1 $ORG/OneBus.git OneBus
+          git clone --depth 1 $ORG/OneChip.git OneChip
       - name: Install the AVR toolchain and simulator
         run: |
           sudo apt-get update
@@ -121,9 +123,9 @@ jobs:
       - name: role
         run: OneMachine/test/role/build.sh
 
-  # Every example, built for the Nano.
+  # Every example, built for each board its platformio.ini names.
   examples:
-    name: examples (Nano)
+    name: examples
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -155,6 +157,6 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-atmelavr-${{ hashFiles('OneMachine/examples/*/platformio.ini') }}
+          key: pio-${{ hashFiles('OneMachine/examples/*/platformio.ini') }}
       - run: pip install platformio
       - run: OneMachine/test/examples/build.sh

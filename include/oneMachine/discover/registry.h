@@ -103,6 +103,7 @@ namespace discover {
   template<typename Self, typename TwiT, typename Consumers, typename Drivers, uint8_t N, typename Scan, typename Buses>
   struct World {
     using Twi    = TwiT;
+    using Bus    = TwiT;   // the same bus, by its generic name: an SPI World's TwiT is its SpiSlots bus
     using BusIdT = typename BusIdOf<Buses>::Type;
 
     inline static Registry<BusIdT, N> reg;
