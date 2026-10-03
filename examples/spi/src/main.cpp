@@ -3,16 +3,23 @@
 // own period. Wemos D1 mini (ESP8266), Serial 115200. Wiring:
 //   RC522    SCK D5, MISO D6, MOSI D7, SDA (its CS) D8, RST D0 (held high here) or 3V3, 3V3, GND
 //   BMP280   SDA D2, SCL D1, 3V3, GND (CSB high or open: I2C mode)
-// Slot 1 (D4) is declared with nothing on it: the scan reports it empty.
+// Slot 1 (D3) is declared with nothing on it: the scan reports it empty.
+// Optional supply switch (a PNP transistor, base through 1k): D4 drives it, low = RC522 VCC on (D4 is
+// high at reset, as boot and flashing need). Without one, key x does nothing visible.
 //
 // Line format: <ms> <name>[<row>]=<value>   a card's UID in hex when one arrives, 0 when it leaves (after 3 polls
 // without it, or when the reader stops answering). miss[1]=<n>: polls in a row that found no card while one is held.
 //              rfid[1] stale | gone | alive, init #<n> | reinit, init #<n>    the reader's row, and how often it was initialised
+//              STATUS <ms> row 1 <from>-><to>      its status changed (0 Alive, 1 Stale, 2 Gone)
+//              HLTH <ms> row 1 flap=F cost=C quarantined=Q probation=P disconnected=D   the health monitor's view, on a change
 //
 // The reader is under failure handling (fail::DevEdge): a reader that stops answering goes Stale, is probed, and is initialised again when
-// it answers; one that was reset without the sketch knowing (its configuration gone) is initialised again at once. Faults, from the serial monitor:
+// it answers; one that was reset without the sketch knowing (its configuration gone) is initialised again at once. A health monitor watches the
+// row: one that keeps flapping is quarantined (not polled) for a growing time. Faults, from the serial monitor:
 //   v   RST low for 3 s: the reader vanishes
 //   p   RST low for 1 ms: a silent reset, the reader still answers and has lost its configuration
+//   x   supply off for 3 s (needs the switch on D4)
+//   l   supply off for 30 s
 #include <Arduino.h>
 #undef bit   // Arduino's bit(b) macro; fail:: has its own bit(Kind)
 #include <chips/esp8266/esp8266Twi.h>
@@ -21,7 +28,9 @@
 #include <oneMachine/discover/registry.h>
 #include <oneMachine/discover/identify.h>
 #include <oneMachine/discover/spi.h>
+#include <oneMachine/fail/busedge.h>
 #include <oneMachine/fail/world.h>
+#include <oneMachine/fail/health.h>
 #include "rc522.h"
 #include "bmp280.h"
 
@@ -34,7 +43,7 @@ using hapi::Chain;
 namespace esp = hw::esp8266;
 
 using Twi = esp::Esp8266TwiMaster<4, 5, 100000>;                                      // SDA D2, SCL D1
-using Spi = hapi::APIOf<oneBus::SpiAPI, oneBus::SpiSlots<esp::OutPin<15>, esp::OutPin<2>>,   // slot 0 D8, slot 1 D4
+using Spi = hapi::APIOf<oneBus::SpiAPI, oneBus::SpiSlots<esp::OutPin<15>, esp::OutPin<0>>,   // slot 0 D8, slot 1 D3
                         oneBus::SpiMaster<4000000>, esp::Esp8266SpiCore>;
 
 struct Printer {
@@ -68,14 +77,18 @@ struct RfidMode {
   template<typename Impl, typename W> using Access = fail::SpiAccess<Impl, W>;
 };
 using Rfid = rc522::Rc522<RfidApp, RfidMode, 1>;
+using RfidDrivers = discover::DriversIn<Chain<Rfid>>;
 struct RfidApp : discover::World<RfidApp, Spi, Chain<Printer>, Chain<Rfid>, 3, discover::SpiScan,
-                                 Chain<discover::SpiSlotIds<Spi::slots>>> {
+                                 Chain<discover::SpiSlotIds<Spi::slots>>>,
+                 fail::DeviceOwnStale<RfidApp, RfidDrivers> {
   static constexpr bool lifecycle = true;
   static void release(RowId) {}
   static void unbindAll() {}
+  using Health = fail::HealthT<RfidApp, RfidDrivers, 3, rc522::HealthCfg>;
 };
-using RfidTicker = fail::Ticks<RfidApp, RfidApp::DriverList>;
+using RfidTicker = fail::Ticks<RfidApp, RfidDrivers>;
 constexpr uint8_t rstPin = 16;   // D0: the RC522's RST
+constexpr uint8_t pwrPin = 2;    // D4: the RC522's supply switch, active low
 struct AirApp  : discover::World<AirApp, Twi, Chain<Printer>, bmp::Entries<AirApp>, 3, discover::I2cScan> {};
 
 template<typename A> static void table(const __FlashStringHelper* bus) {
@@ -90,6 +103,7 @@ void setup() {
   delay(200);
   Serial.println(F("\nOneMachine SPI + I2C discovery"));
   Serial.println(F("build " BUILD_REV " " __DATE__ " " __TIME__));
+  esp::OutPin<pwrPin>::begin(); esp::OutPin<pwrPin>::off();   // RC522 supply on (low), when switched
   esp::OutPin<rstPin>::begin(); esp::OutPin<rstPin>::on();   // RC522 RST high; a chip select on this pin would reset it
   Twi::begin();
   Spi::begin();
@@ -116,6 +130,19 @@ void setup() {
   }
 }
 
+// the health monitor's view of the reader's row, when its quarantine state changes
+static void logHealth() {
+  static uint8_t last = 0xFF;
+  if (RfidApp::reg.count < 2) return;
+  const fail::HealthRow& h = RfidApp::Health::status(1);
+  const uint8_t state = uint8_t((h.quarantined << 2) | (h.probation << 1) | h.disconnected);
+  if (state == last) return;
+  last = state;
+  Serial.print(F("HLTH ")); Serial.print(millis()); Serial.print(F(" row 1 flap=")); Serial.print(h.flapEwma);
+  Serial.print(F(" cost=")); Serial.print(h.costEwma); Serial.print(F(" quarantined=")); Serial.print(h.quarantined);
+  Serial.print(F(" probation=")); Serial.print(h.probation); Serial.print(F(" disconnected=")); Serial.println(h.disconnected);
+}
+
 // the reader's row: a status change, and each initialisation
 static void logRfid() {
   static discover::Status last = discover::Status::Gone;   // nothing reported yet
@@ -124,6 +151,7 @@ static void logRfid() {
   const discover::Status st = RfidApp::reg.status(1);
   const uint16_t inits = RfidApp::devState<Rfid>(1).inits;
   if (st != last) {
+    if (last != discover::Status::Gone) { Serial.print(F("STATUS ")); Serial.print(millis()); Serial.print(F(" row 1 ")); Serial.print(uint8_t(last)); Serial.print(F("->")); Serial.println(uint8_t(st)); }
     Serial.print(millis()); Serial.print(F(" rfid[1] "));
     if (st == discover::Status::Alive) { Serial.print(F("alive, init #")); Serial.println(inits); }
     else Serial.println(st == discover::Status::Stale ? F("stale") : F("gone"));
@@ -138,14 +166,22 @@ static void logRfid() {
 static void faults(uint32_t now) {
   static uint32_t vanishEnd = 0;
   static bool vanished = false;
+  static uint32_t unpoweredEnd = 0;
+  static bool unpowered = false;
   if (Serial.available()) {
     const int c = Serial.read();
     if (c == 'v' && !vanished) { Serial.print(now); Serial.println(F(" fault: RST low 3 s")); esp::OutPin<rstPin>::off(); vanished = true; vanishEnd = now + 3000; }
+    else if ((c == 'x' || c == 'l') && !unpowered) {
+      const uint32_t ms = c == 'x' ? 3000 : 30000;
+      Serial.print(now); Serial.print(F(" fault: supply off ")); Serial.print(ms / 1000); Serial.println(F(" s"));
+      esp::OutPin<pwrPin>::on(); unpowered = true; unpoweredEnd = now + ms;
+    }
     else if (c == 'p' && !vanished) {
       Serial.print(now); Serial.println(F(" fault: RST pulse"));
       esp::OutPin<rstPin>::off(); delayMicroseconds(1000); esp::OutPin<rstPin>::on();
     }
   }
+  if (unpowered && int32_t(now - unpoweredEnd) >= 0) { esp::OutPin<pwrPin>::off(); unpowered = false; Serial.print(now); Serial.println(F(" fault: supply on")); }
   if (vanished && int32_t(now - vanishEnd) >= 0) { esp::OutPin<rstPin>::on(); vanished = false; Serial.print(now); Serial.println(F(" fault: RST high")); }
 }
 
@@ -160,6 +196,9 @@ void loop() {
     if (miss != lastMiss) { lastMiss = miss; if (miss) { Serial.print(millis()); Serial.print(F(" miss[1]=")); Serial.println(miss); } }
   }
   RfidTicker::run(now);
+  RfidApp::Health::onEdge();
+  RfidApp::Health::onTick(now);
   logRfid();
+  logHealth();
   if (int32_t(now - nextAir)  >= 0) { nextAir  = now + 1000; AirApp::pump(); }
 }

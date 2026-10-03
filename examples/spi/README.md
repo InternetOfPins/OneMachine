@@ -24,7 +24,11 @@ Wemos D1 mini (ESP8266), everything at 3.3V.
 | D2 (GPIO4) | | SDA |
 | D1 (GPIO5) | | SCL |
 
-Slot 1 is D4 (GPIO2) with nothing on it: the scan reports it empty.
+Slot 1 is D3 (GPIO0) with nothing on it: the scan reports it empty.
+
+Optional: D4 (GPIO2) is held low as a supply switch for the RC522's VCC (a PNP transistor, for example a 2N2907: emitter
+to 3V3, collector to VCC, base through 1 k to D4; D4 is high at reset, so the RC522 is off until the sketch starts).
+Keys `x` and `l` below cut it for 3 s or 30 s. Without a switch there, they change nothing.
 
 ## Build and flash
 
@@ -71,6 +75,7 @@ Type a key in the serial monitor to drive RC522 RST (D0) from the sketch:
 | --- | --- | --- |
 | `v` | RST low for 3 s: the reader vanishes | `rfid[1] stale`, `card[1]=0` if a card was held, then `rfid[1] alive, init #n` after release |
 | `p` | RST low for 1 ms: a silent reset, the ID still answers | `rfid[1] reinit, init #n`, the row stays Alive |
+| `x`, `l` | supply off for 3 s, or 30 s (with the switch on D4) | as `v`; the chip may still answer through its signal pins, so it can flap before it goes quiet |
 
 A card that picks a new UID each time its field restarts (random-UID tags, phones; UIDs starting `08`) shows a new
 UID after every fault.
