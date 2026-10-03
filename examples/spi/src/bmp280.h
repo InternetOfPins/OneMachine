@@ -27,9 +27,27 @@ namespace bmp {
       Twi::begin_write(B::addrOf(row)); Twi::write_byte(reg); Twi::write_byte(v); Twi::end_write();
     }
 
-    static void init(RowId row) {
-      uint8_t c[24] = {};
+    // the calibration is read until two reads agree: a corrupted read here would skew every later sample
+    static bool readCal(RowId row, uint8_t* c) {
+      uint8_t c2[24] = {};
       B::readRegs(B::addrOf(row), 0x88, c, 24);
+      B::readRegs(B::addrOf(row), 0x88, c2, 24);
+      for (uint8_t i = 0; i < 24; ++i) if (c[i] != c2[i]) return false;
+      const uint16_t t1 = uint16_t(c[0] | (c[1] << 8)), p1 = uint16_t(c[6] | (c[7] << 8));
+      return t1 != 0 && t1 != 0xFFFF && p1 != 0 && p1 != 0xFFFF;
+    }
+
+    static void init(RowId row) {
+      writeReg(row, 0xE0, 0xB6);   // soft reset: a warm restart finds the part as the last firmware left it
+      for (uint8_t i = 0; i < 200; ++i) {   // status bit 0 (im_update) is set while the NVM is copied in
+        uint8_t st = 1;
+        B::readRegs(B::addrOf(row), 0xF3, &st, 1);
+        if (!(st & 1)) break;
+      }
+      uint8_t c[24] = {};
+      bool ok = false;
+      for (uint8_t i = 0; i < 5 && !(ok = readCal(row, c)); ++i) {}
+      if (!ok) return;   // calibration stays zero: read() emits nothing
       auto u = [&](uint8_t i) { return uint16_t(c[i] | (uint16_t(c[i + 1]) << 8)); };
       auto s = [&](uint8_t i) { return int16_t(u(i)); };
       auto& d = B::dev(row);
@@ -45,6 +63,8 @@ namespace bmp {
       const int32_t adcP = int32_t((uint32_t(b[0]) << 12) | (uint32_t(b[1]) << 4) | (b[2] >> 4));
       const int32_t adcT = int32_t((uint32_t(b[3]) << 12) | (uint32_t(b[4]) << 4) | (b[5] >> 4));
       const auto& d = B::dev(row);
+      if (d.T1 == 0) return;           // no calibration
+      if (adcT == 0x80000) return;     // 0x80000: no conversion yet (reset value)
 
       const int32_t v1 = ((((adcT >> 3) - (int32_t(d.T1) << 1))) * int32_t(d.T2)) >> 11;
       const int32_t v2 = (((((adcT >> 4) - int32_t(d.T1)) * ((adcT >> 4) - int32_t(d.T1))) >> 12) * int32_t(d.T3)) >> 14;
@@ -57,7 +77,7 @@ namespace bmp {
       p2 = p2 + (int64_t(d.P4) << 35);
       p1 = ((p1 * p1 * int64_t(d.P3)) >> 8) + ((p1 * int64_t(d.P2)) << 12);
       p1 = (((int64_t(1) << 47) + p1) * int64_t(d.P1)) >> 33;
-      if (p1 == 0) return;   // no calibration: a part that did not answer at found()
+      if (p1 == 0 || adcP == 0x80000) return;   // no calibration, or no pressure conversion yet
       int64_t p = 1048576 - adcP;
       p = (((p << 31) - p2) * 3125) / p1;
       p1 = (int64_t(d.P9) * (p >> 13) * (p >> 13)) >> 25;
