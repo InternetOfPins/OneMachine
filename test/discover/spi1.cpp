@@ -102,6 +102,7 @@ int main() {
   CHECK(State::modeAt[0] == 0);                    // and the RC522 in its own
   CHECK((State::rc.regs[0x14] & 0x03) == 0x03);    // init ran: antenna on
   CHECK(State::rc.regs[0x2C] == 0x03 && State::rc.regs[0x2D] == 0xE8);
+  CHECK(App::devState<Rfid>(rowOn(0)).initTries >= 1); // the configuration read back
   CHECK(State::sel == -1);                         // nothing left selected
 
   // the BME280 id and the clone RC522 ids are accepted too
