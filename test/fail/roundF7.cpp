@@ -330,6 +330,26 @@ static void quietInsideBlockDoesNotCool() {
   while (T < blockEnd) step();                                                   // a whole hard block, not polled
   CHECK(App::Health::status(b).quietPeriods == 0);                              // none of it counted as quiet
 }
+
+// ---- 10. a probe that failed is a failed probe, even when the row stayed Alive: one bad window lifts the decayed cost only to 31,
+// under exitD (32), so the averages alone would let out a device that failed every poll of its probe without ever going Stale ---------
+static void probeFailedWhileAlive() {
+  fresh();
+  A::resetFail(); B::resetFail(); App::resetCtl();                              // the edges' own deadlines from the scenarios before (fresh() restarts T at 0)
+  const RowId b = rowOfB();
+  B::forceCorrupt = true;                                                       // answers, reports its reading corrupted: never Stale
+  for (int i = 0; i < 20 && !App::Health::status(b).quarantined; ++i) run(T + 500);
+  CHECK(App::Health::status(b).quarantined);
+  bool leftEarly = false;
+  const uint32_t until = T + 30000;
+  while (T < until) { step(); if (!App::Health::status(b).quarantined) leftEarly = true; }
+  CHECK(!leftEarly && App::reg.status(b) == Status::Alive);                     // it stayed Alive throughout: only its failures kept it in
+  CHECK(App::Health::status(b).fib.cur >= 3);                                   // each failed probe made the next block longer
+  B::forceCorrupt = false;                                                      // it reads clean again: a probe finds it quiet, and it rejoins
+  bool cleared = false;
+  for (int i = 0; i < 200 && !cleared; ++i) { run(T + 500); cleared = !App::Health::status(b).quarantined; }
+  CHECK(cleared);
+}
 #endif
 
 int main() {
@@ -347,6 +367,7 @@ int main() {
   hysteresis();
   probeIsJudged();
   quietInsideBlockDoesNotCool();
+  probeFailedWhileAlive();
 #endif
   std::printf("checks %d\n", checks);
   std::printf(failures ? "FAILED (%d)\n" : "OK: failCompose F7 native\n", failures);
