@@ -24,6 +24,16 @@ if command -v clang++ >/dev/null; then
   "$OUT/s1clang" | tail -1 || rc=1
 fi
 
+echo; echo "=== RC522 under the failure edge (spi_fail.cpp): g++ -O2, then ASan/UBSan ==="
+g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $INC spi_fail.cpp -o "$OUT/sf"
+"$OUT/sf" || rc=1
+g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC spi_fail.cpp -o "$OUT/sfsan"
+"$OUT/sfsan" | tail -1 || rc=1
+if command -v clang++ >/dev/null; then
+  clang++ -std=c++17 -O2 -Wall -Wextra $INC spi_fail.cpp -o "$OUT/sfclang"
+  "$OUT/sfclang" | tail -1 || rc=1
+fi
+
 echo; echo "=== compile-fail guards (each must be rejected with its own message) ==="
 for pair in "NEG_ID_IDLE:an SPI id of 0x00 or 0xFF is what an empty slot reads" \
             "NEG_FIXED_TWICE:two Fixed entries name the same slot" \

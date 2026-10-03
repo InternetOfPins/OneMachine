@@ -1,6 +1,7 @@
 // A simulated SPI bus behind oneBus::SpiSlots, for the SPI discovery tests. Four slots, each with a chip select pin
 // (MockCs<K>) and whatever sits behind it:
-//   Rc522    a register model of an MFRC522: VersionReg, the FIFO, Transceive with a card in the field (WUPA -> ATQA,
+//   Rc522    a register model of an MFRC522: VersionReg, the FIFO, a SoftReset that lands late, RST held low (hold(): reads 0x00,
+//            writes ignored, register defaults on release), Transceive with a card in the field (WUPA -> ATQA,
 //            cascade-1 anticollision -> UID + BCC), the READY quirk (a card left READY ignores the next wake-up), a
 //            corrupt BCC and a collision on request
 //   Bmx      a BMP280/BME280 in SPI mode: register 0xD0 reads its chip id, bit 7 of the first byte means read
@@ -32,12 +33,22 @@ namespace mspi {
                           // reset value of CommandReg (0x20, PowerDown clear) and 0 elsewhere -- no flag says it is over
     void reset(uint8_t version) {
       for (auto& r : regs) r = 0;
-      regs[0x37] = version; regs[0x14] = 0x80; n = 0; resetReads = 0; deaf = 0; pending = 0;
+      regs[0x37] = version; regs[0x14] = 0x80; n = 0; resetReads = 0; deaf = 0; pending = 0; held = false;
+    }
+    bool noStore = false; // the ID answers and nothing written is kept (a part living off its signal pins)
+    bool held = false;    // RST low: the part reads 0x00 and ignores writes; released, it comes up at its register defaults (a hard reset, not a SoftReset)
+    void hold(bool on) {
+      if (on) { held = true; pending = 0; return; }
+      if (!held) return;
+      held = false;
+      const uint8_t ver = regs[0x37];
+      reset(ver);
     }
     void tick() {
       if (pending && --pending == 0) { const uint8_t ver = regs[0x37]; reset(ver); resetReads = 3000; deaf = 40; }
     }
     uint8_t read(uint8_t reg) {
+      if (held) return 0;
       tick();
       if (deaf) { --deaf; return reg == 0x01 ? 0x20 : 0; }
       if (reg == 0x09) { if (!n) return 0; const uint8_t v = fifo[0]; for (uint8_t i = 1; i < n; ++i) fifo[i - 1] = fifo[i]; --n; return v; }
@@ -47,6 +58,7 @@ namespace mspi {
     }
     void push(uint8_t b) { if (n < 16) fifo[n++] = b; }
     void write(uint8_t reg, uint8_t v, Card& card) {
+      if (held || noStore) return;
       tick();
       if (deaf) { --deaf; return; }
       reg &= 0x3F;

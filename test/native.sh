@@ -19,6 +19,7 @@ PROGRAMS=(
   discover/round3
   discover/round3b
   discover/spi1
+  discover/spi_fail
   fail/unit_f1
   fail/unit_f2
   fail/unit_f3

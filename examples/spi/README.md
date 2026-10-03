@@ -57,5 +57,20 @@ first three bytes (cascade level 1 only).
   (a register model of the RC522 on a mock SPI bus): identification at each driver's own mode, empty slots high, low
   and floating, a stuck-low MISO, a `Fixed` slot never probed, and the card path (arrival, departure, a corrupt BCC, a
   collision).
-- Failure handling (`fail::DevEdge`, `HealthT`) is not composed over the SPI rows yet: an RC522 that stops answering
-  is not detected here. That is the next round.
+- Failure handling is composed over the RC522's row (`fail::DevEdge` with `fail::SpiAccess`): a reader that stops
+  answering goes Stale, is probed, and is initialised again when it answers; one that was reset without the sketch
+  knowing (its configuration read back is gone) is initialised again at once. `test/discover/spi_fail.cpp` runs both
+  against the register model with RST driven. `HealthT` is not composed here.
+- The BMP280 on I2C has no failure edge: a supply disturbance that resets it leaves it in sleep mode, silent.
+
+## Faults
+
+Type a key in the serial monitor to drive RC522 RST (D0) from the sketch:
+
+| Key | Fault | Log |
+| --- | --- | --- |
+| `v` | RST low for 3 s: the reader vanishes | `rfid[1] stale`, `card[1]=0` if a card was held, then `rfid[1] alive, init #n` after release |
+| `p` | RST low for 1 ms: a silent reset, the ID still answers | `rfid[1] reinit, init #n`, the row stays Alive |
+
+A card that picks a new UID each time its field restarts (random-UID tags, phones; UIDs starting `08`) shows a new
+UID after every fault.
