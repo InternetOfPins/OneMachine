@@ -23,7 +23,8 @@ namespace mspi {
   struct Rc522Model {
     uint8_t regs[64];
     uint8_t fifo[16]; uint8_t n;
-    uint8_t resetReads;   // CommandReg reads PowerDown this many times after a SoftReset
+    uint16_t resetReads;  // CommandReg reads PowerDown this many times after a SoftReset (the oscillator starting:
+                          // tens of ms on a real part, thousands of SPI reads)
     uint8_t deaf;         // then this many accesses while the oscillator starts: writes are lost, reads give the
                           // reset value of CommandReg (0x20, PowerDown clear) and 0 elsewhere -- no flag says it is over
     void reset(uint8_t version) {
@@ -45,7 +46,7 @@ namespace mspi {
         case 0x09: push(v); return;
         case 0x0A: if (v & 0x80) n = 0; return;
         case 0x04: if (v & 0x80) regs[reg] |= (v & 0x7F); else regs[reg] &= uint8_t(~v); return;   // Set1 bit
-        case 0x01: regs[reg] = v; if (v == 0x0F) { const uint8_t ver = regs[0x37]; reset(ver); resetReads = 3; deaf = 40; } return;
+        case 0x01: regs[reg] = v; if (v == 0x0F) { const uint8_t ver = regs[0x37]; reset(ver); resetReads = 3000; deaf = 40; } return;
         case 0x0D:
           regs[reg] = v;
           if ((v & 0x80) && regs[0x01] == 0x0C) transceive(card);
