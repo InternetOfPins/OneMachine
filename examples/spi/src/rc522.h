@@ -50,13 +50,15 @@ namespace rc522 {
       return rd(row, TPrescalerReg) == 0xA9 && rd(row, TReloadRegL) == 0xE8 && (rd(row, TxControlReg) & 0x03) == 0x03;
     }
 
-    // A SoftReset restarts the oscillator. PowerDown reads 1 until it runs, which takes tens of ms (the MFRC522
-    // library allows 150): a bound in register reads, as there is no clock here, of 60000 reads (about 0.6 s at
-    // 4 MHz on an ESP8266, when the part never wakes). Writes made before it runs are lost, the antenna stays off
-    // and no card ever answers, and PowerDown may not show the whole window either: so the configuration is then
-    // written until it reads back.
+    // A SoftReset restarts the oscillator and takes effect some time after the write; there is no clock here, so
+    // each wait is a bound in register reads. A marker written before it reads back 0 once the reset has happened
+    // (TReloadRegL resets to 0). Then PowerDown reads 1 until the oscillator runs (tens of ms; the MFRC522 library
+    // allows 150). Writes made before that are lost and the antenna stays off, and PowerDown may not show the whole
+    // window: so the configuration is then written until it reads back.
     static void init(RowId row) {
+      wr(row, TReloadRegL, 0x5A);
       wr(row, CommandReg, SoftReset);
+      for (uint16_t i = 0; i < 60000 && rd(row, TReloadRegL) != 0x00; ++i) {}
       for (uint16_t i = 0; i < 60000 && (rd(row, CommandReg) & 0x10); ++i) {}
       for (uint16_t i = 0; i < 1000; ++i) {
         wr(row, TModeReg, 0x80);       // timer starts at the end of a transmission

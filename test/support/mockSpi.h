@@ -25,13 +25,20 @@ namespace mspi {
     uint8_t fifo[16]; uint8_t n;
     uint16_t resetReads;  // CommandReg reads PowerDown this many times after a SoftReset (the oscillator starting:
                           // tens of ms on a real part, thousands of SPI reads)
+    uint16_t lateBy = 30; // a SoftReset written takes effect this many accesses later (each read or write counts); the
+                          // configuration written in between is wiped when it does, as on a real part
+    uint16_t pending = 0; // accesses left before the SoftReset applies; 0: none waiting
     uint8_t deaf;         // then this many accesses while the oscillator starts: writes are lost, reads give the
                           // reset value of CommandReg (0x20, PowerDown clear) and 0 elsewhere -- no flag says it is over
     void reset(uint8_t version) {
       for (auto& r : regs) r = 0;
-      regs[0x37] = version; regs[0x14] = 0x80; n = 0; resetReads = 0; deaf = 0;
+      regs[0x37] = version; regs[0x14] = 0x80; n = 0; resetReads = 0; deaf = 0; pending = 0;
+    }
+    void tick() {
+      if (pending && --pending == 0) { const uint8_t ver = regs[0x37]; reset(ver); resetReads = 3000; deaf = 40; }
     }
     uint8_t read(uint8_t reg) {
+      tick();
       if (deaf) { --deaf; return reg == 0x01 ? 0x20 : 0; }
       if (reg == 0x09) { if (!n) return 0; const uint8_t v = fifo[0]; for (uint8_t i = 1; i < n; ++i) fifo[i - 1] = fifo[i]; --n; return v; }
       if (reg == 0x0A) return n;
@@ -40,13 +47,14 @@ namespace mspi {
     }
     void push(uint8_t b) { if (n < 16) fifo[n++] = b; }
     void write(uint8_t reg, uint8_t v, Card& card) {
+      tick();
       if (deaf) { --deaf; return; }
       reg &= 0x3F;
       switch (reg) {
         case 0x09: push(v); return;
         case 0x0A: if (v & 0x80) n = 0; return;
         case 0x04: if (v & 0x80) regs[reg] |= (v & 0x7F); else regs[reg] &= uint8_t(~v); return;   // Set1 bit
-        case 0x01: regs[reg] = v; if (v == 0x0F) { const uint8_t ver = regs[0x37]; reset(ver); resetReads = 3000; deaf = 40; } return;
+        case 0x01: regs[reg] = v; if (v == 0x0F) pending = lateBy ? lateBy : 1; return;
         case 0x0D:
           regs[reg] = v;
           if ((v & 0x80) && regs[0x01] == 0x0C) transceive(card);
