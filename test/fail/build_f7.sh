@@ -56,6 +56,8 @@ mutate7 "the quiet inside a hard block cools the back-off" \
   's|h.flapEwma < Cfg::exitQ \&\& !h.quarantined|h.flapEwma < Cfg::exitQ|'
 mutate7 "disconnected is set without an isolate() having run" \
   's|h.disconnected = IsolateFold<Drivers>::template call<W>(r);|IsolateFold<Drivers>::template call<W>(r); h.disconnected = true;|' no_isolate_fn
+mutate7 "a probe that failed while the row stayed Alive is let out by the averages" \
+  's|if (!moved \&\& W::reg.status(r)|if (W::reg.status(r)|'
 mutate7 "bus cost attributed to the wrong row" \
   '/if (W::reg.rows\[m\].drv != discover::instOf<Dr>()) return false;/d'
 
