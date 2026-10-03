@@ -11,9 +11,9 @@ rc=0
 ok()  { echo "OK: $*"; }
 bad() { echo "FAIL: $*"; rc=1; }
 
-echo "=== F7.1 native: the three builds (default, F7_REQUIRED, F7_NO_ISOLATE) ==="
-declare -A FL=( [default]="" [required]="-DF7_REQUIRED" [no_isolate]="-DF7_NO_ISOLATE" )
-for v in default required no_isolate; do
+echo "=== F7.1 native: the four builds (default, F7_REQUIRED, F7_NO_ISOLATE, F7_NO_ISOLATE_FN) ==="
+declare -A FL=( [default]="" [required]="-DF7_REQUIRED" [no_isolate]="-DF7_NO_ISOLATE" [no_isolate_fn]="-DF7_NO_ISOLATE_FN" )
+for v in default required no_isolate no_isolate_fn; do
   g++ -std=c++17 -O2 -Wall -Wextra ${FL[$v]} $INC roundF7.cpp -o "$OUT/f7_$v" 2> "$OUT/cc_$v.txt" || { bad "$v does not compile"; cat "$OUT/cc_$v.txt"; continue; }
   w=$(grep -c warning "$OUT/cc_$v.txt" || true)
   "$OUT/f7_$v" > "$OUT/r_$v.txt" || true
@@ -47,9 +47,15 @@ mutate7 "a bus fault is counted as its devices' own flaps" \
 mutate7 "a required row is quarantined anyway" \
   's|const bool required = W::reg.rows\[r\].isBus ? RequiredBusFold<W>::of(r) : RequiredFold<Drivers>::template of<W>(r);|const bool required = false;|' required
 mutate7 "no hysteresis: probation exits at the same level it entered" \
-  's|if (h.flapEwma < Cfg::exitQ \&\& h.costEwma < Cfg::exitD)|if (h.flapEwma < Cfg::enterQ \&\& h.costEwma < Cfg::enterD)|'
+  's|h.flapEwma < Cfg::exitQ \&\& h.costEwma < Cfg::exitD)|h.flapEwma < Cfg::enterQ \&\& h.costEwma < Cfg::enterD)|'
 mutate7 "a quarantine that never ends" \
-  's|if (h.flapEwma < Cfg::exitQ \&\& h.costEwma < Cfg::exitD)|if (h.flapEwma < Cfg::exitQ \&\& h.costEwma < Cfg::exitD \&\& false)|'
+  's|h.flapEwma < Cfg::exitQ \&\& h.costEwma < Cfg::exitD)|h.flapEwma < Cfg::exitQ \&\& h.costEwma < Cfg::exitD \&\& false)|'
+mutate7 "the probe is judged when its window opens, on the averages that decayed in the block" \
+  's|if (h.probeWindowOpen) { h.probing = true; return; }|if (h.probeWindowOpen) h.probing = true;|'
+mutate7 "the quiet inside a hard block cools the back-off" \
+  's|h.flapEwma < Cfg::exitQ \&\& !h.quarantined|h.flapEwma < Cfg::exitQ|'
+mutate7 "disconnected is set without an isolate() having run" \
+  's|h.disconnected = IsolateFold<Drivers>::template call<W>(r);|IsolateFold<Drivers>::template call<W>(r); h.disconnected = true;|' no_isolate_fn
 mutate7 "bus cost attributed to the wrong row" \
   '/if (W::reg.rows\[m\].drv != discover::instOf<Dr>()) return false;/d'
 

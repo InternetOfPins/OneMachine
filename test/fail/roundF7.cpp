@@ -39,7 +39,9 @@ struct HDev : discover::DriverBase<HDev<W, AddrLo, AddrHi, Id, Required>, W>, fa
 #endif
   inline static uint8_t isolated = 0;
   inline static bool    forceCorrupt = false;      // a device that answers but reports its own reading corrupted: costs bus time, never goes Stale
-  static void isolate(RowId) { ++isolated; }
+#ifndef F7_NO_ISOLATE_FN
+  static void isolate(RowId) { ++isolated; }          // F7_NO_ISOLATE_FN: mayIsolate declared, nothing to cut
+#endif
 
   static void reinit(RowId) {}
   static void read(RowId row) { Edge::serve(row, fail::Cause::Fresh); }
@@ -174,14 +176,16 @@ static void dragsTheBus() {
   const RowId a = rowOfA(), b = rowOfB();
   B::forceCorrupt = true;
   uint16_t peakCost = 0;
-  bool disconnectedYet = false;
-  for (int i = 0; i < 20 && !disconnectedYet; ++i) {
+  for (int i = 0; i < 20 && !App::Health::status(b).quarantined; ++i) {
     run(T + 500);
     if (App::Health::status(b).costEwma > peakCost) peakCost = App::Health::status(b).costEwma;
-    disconnectedYet = App::Health::status(b).disconnected;
   }
   CHECK(peakCost >= 96 && App::Health::status(b).flapCount == 0);                // cost alone crossed enterD; never went Stale
-  CHECK(App::Health::status(b).quarantined && disconnectedYet && B::isolated >= 1);
+#ifdef F7_NO_ISOLATE_FN
+  CHECK(App::Health::status(b).quarantined && !App::Health::status(b).disconnected && B::isolated == 0);   // quarantined, but nothing was cut: not "disconnected"
+#else
+  CHECK(App::Health::status(b).quarantined && App::Health::status(b).disconnected && B::isolated >= 1);
+#endif
   const uint16_t na = Log::n[a];
   run(T + 1000);
   CHECK(Log::n[a] > na);                                                        // A's own polling is unaffected by B's disconnect
@@ -289,6 +293,43 @@ static void hysteresis() {
   while (T < until) { App::Health::rows[b].flapEwma = 60; App::Health::rows[b].costEwma = 0; step(); }
   CHECK(App::Health::status(b).quarantined);                                    // 60 is inside the band: mid-band must stay quarantined
 }
+
+// ---- 8. the probe is judged after it ran: a device that is still bad on its probes is not let out by the averages that decayed -----
+static void probeIsJudged() {
+  fresh();
+  const RowId b = rowOfB();
+  for (int i = 0; i < 7 && !App::Health::status(b).quarantined; ++i) {
+    mock::Bus::devs[1].addr = 0x4F; run(T + 150);
+    mock::Bus::devs[1].addr = 0x48; run(T + 150);
+  }
+  CHECK(App::Health::status(b).quarantined);
+  mock::Bus::devs[1].addr = 0x4F;                                               // gone, and it stays gone through the hard block and the probes
+  bool leftEarly = false;
+  const uint32_t until = T + 30000;
+  while (T < until) { step(); if (!App::Health::status(b).quarantined) leftEarly = true; }
+  CHECK(!leftEarly);                                                            // the averages decayed long ago; the probes found it still gone
+  CHECK(App::Health::status(b).quarantined && App::Health::status(b).fib.cur >= 3);   // and each failed probe made the next block longer
+  // it comes back: a probe finds it answering and quiet, and it rejoins
+  mock::Bus::devs[1].addr = 0x48;
+  bool cleared = false;
+  for (int i = 0; i < 200 && !cleared; ++i) { run(T + 500); cleared = !App::Health::status(b).quarantined; }
+  CHECK(cleared && App::reg.status(b) == Status::Alive);
+}
+
+// ---- 9. a long quarantine does not cool the back-off: the quiet inside the block is not the device being quiet ---------------------
+static void quietInsideBlockDoesNotCool() {
+  fresh();
+  const RowId b = rowOfB();
+  for (int i = 0; i < 7 && !App::Health::status(b).quarantined; ++i) {
+    mock::Bus::devs[1].addr = 0x4F; run(T + 150);
+    mock::Bus::devs[1].addr = 0x48; run(T + 150);
+  }
+  CHECK(App::Health::status(b).quarantined && App::Health::status(b).quietPeriods == 0);
+  App::Health::rows[b].flapEwma = 0;                                            // as if it had decayed: below exitQ for the whole block
+  const uint32_t blockEnd = App::Health::status(b).until;
+  while (T < blockEnd) step();                                                   // a whole hard block, not polled
+  CHECK(App::Health::status(b).quietPeriods == 0);                              // none of it counted as quiet
+}
 #endif
 
 int main() {
@@ -304,6 +345,8 @@ int main() {
   singleOutage();
   busFaultNotFlap();
   hysteresis();
+  probeIsJudged();
+  quietInsideBlockDoesNotCool();
 #endif
   std::printf("checks %d\n", checks);
   std::printf(failures ? "FAILED (%d)\n" : "OK: failCompose F7 native\n", failures);
