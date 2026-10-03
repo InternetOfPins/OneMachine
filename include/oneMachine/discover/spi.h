@@ -76,6 +76,14 @@ namespace discover {
   template<typename A, typename... R> struct FixedDistinct<A, R...>
     : std::bool_constant<((!IsFixed<A>::value || fixedSlotOf<A>() != fixedSlotOf<R>()) && ...) && FixedDistinct<R...>::value> {};
 
+  // the byte a driver's ID command reads from a slot, at the driver's own clock and mode; the scan and the failure edge's reprobe both read it this way
+  template<typename Bus, typename X> uint8_t spiIdByte(uint8_t slot) {
+    SpiCfg<Bus>::use(X::spiHz, X::spiMode);
+    uint8_t io[2] = {X::idCmd, 0};
+    Bus::xfer(slot, io, io, 2);
+    return io[1];
+  }
+
   struct SpiScan {
     template<typename Self, typename Entries> static void run(RowId bus) {
       if (bus != rootRow) return;   // an SPI bus has no bridges: one root, its slots
@@ -115,11 +123,8 @@ namespace discover {
       }
 
       template<typename X> static int16_t readId(uint8_t slot) {
-        using Bus = typename Self::Bus;
-        SpiCfg<Bus>::use(X::spiHz, X::spiMode);
-        uint8_t io[2] = {X::idCmd, 0};
-        Bus::xfer(slot, io, io, 2);
-        return X::Ids::has(io[1]) ? int16_t(io[1]) : int16_t(-1);
+        const uint8_t b = spiIdByte<typename Self::Bus, X>(slot);
+        return X::Ids::has(b) ? int16_t(b) : int16_t(-1);
       }
     };
   };
