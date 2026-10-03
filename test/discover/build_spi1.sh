@@ -34,6 +34,16 @@ if command -v clang++ >/dev/null; then
   "$OUT/sfclang" | tail -1 || rc=1
 fi
 
+echo; echo "=== RC522 under the health monitor (spi_health.cpp): g++ -O2, then ASan/UBSan ==="
+g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $INC spi_health.cpp -o "$OUT/sh"
+"$OUT/sh" || rc=1
+g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC spi_health.cpp -o "$OUT/shsan"
+"$OUT/shsan" | tail -1 || rc=1
+if command -v clang++ >/dev/null; then
+  clang++ -std=c++17 -O2 -Wall -Wextra $INC spi_health.cpp -o "$OUT/shclang"
+  "$OUT/shclang" | tail -1 || rc=1
+fi
+
 echo; echo "=== compile-fail guards (each must be rejected with its own message) ==="
 for pair in "NEG_ID_IDLE:an SPI id of 0x00 or 0xFF is what an empty slot reads" \
             "NEG_FIXED_TWICE:two Fixed entries name the same slot" \

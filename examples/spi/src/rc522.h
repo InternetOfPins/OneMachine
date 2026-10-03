@@ -12,6 +12,7 @@
 #include <oneMachine/discover/spi.h>
 #include <oneMachine/fail/devedge.h>
 #include <oneMachine/fail/spiaccess.h>
+#include <oneMachine/fail/health.h>
 
 namespace rc522 {
 
@@ -27,6 +28,14 @@ namespace rc522 {
   };
   enum Cmd : uint8_t { Idle = 0x00, Transceive = 0x0C, SoftReset = 0x0F };
 
+  // The health monitor's thresholds for this row. A reader that is half powered flaps Stale/Alive about once a second; against the monitor's 500 ms
+  // decay that settles near 80 on the 0..256 flap scale, under the default entry threshold of 96: it would be reported but never quarantined. One
+  // isolated fault adds 32 and decays away.
+  struct HealthCfg : fail::DefaultHealthCfg {
+    static constexpr uint16_t enterQ = 64, exitQ = 32;
+    static_assert(enterQ > exitQ, "Health: enter threshold must exceed exit threshold (hysteresis)");
+  };
+
   // no failure handling: the driver polls and nothing is retried, probed or reported
   struct NoFail {
     static constexpr bool lifecycle = false, returnPath = false, idempotent = true;
@@ -39,6 +48,7 @@ namespace rc522 {
     using B    = discover::SpiDriverBase<Rc522, W>;
     using Edge = fail::DevEdge<Rc522, W, M, K>;
     using Produces = hapi::Chain<Card>;
+    static constexpr bool mayIsolate = true;   // a health monitor may quarantine the row (it has no isolate(): nothing cuts its supply)
     static constexpr uint8_t recoverMask = fail::bit(fail::Kind::Corrupt);   // a reset the host did not see: init again
 
     static constexpr uint32_t spiHz   = 4000000;   // the chip takes 10 MHz; 4 is kind to jumper wires
