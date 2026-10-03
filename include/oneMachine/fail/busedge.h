@@ -48,6 +48,13 @@ namespace fail {
     }
   };
 
+  // ownStale for a world without a bus edge (an SPI bus: no ACK, no bus-level cause): a device row holds a fault of its own when its
+  // driver's edge says so, a bus row never does. What a health monitor asks of Self::ownStale(m).
+  template<typename Self, typename Drivers>
+  struct DeviceOwnStale {
+    [[nodiscard]] static bool ownStale(RowId m) { return !Self::reg.rows[m].isBus && OwnStaleFold<Drivers>::template any<Self>(m); }
+  };
+
   template<typename Self, typename Drivers, uint8_t KB, typename Mode>
   struct BusEdge {
     struct Env {
