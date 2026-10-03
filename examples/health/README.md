@@ -2,7 +2,8 @@
 
 `recover` adds a health monitor: a row that flaps too often, or costs too much bus time retrying, is quarantined
 (left alone, tried again on a growing schedule) and then disconnected -- its own supply cut -- instead of retried
-forever.
+forever. A quarantine ends only when a probe finds the row answering and quiet; a probe that finds it still bad starts a
+longer block.
 
 ## Wiring
 

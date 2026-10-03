@@ -83,9 +83,13 @@ namespace fail {
   };
   template<typename L> struct IsolateFold;
   template<typename... D> struct IsolateFold<hapi::Chain<D...>> {
-    template<typename W> static void call(RowId m) { (one<W, D>(m), ...); }
+    // true when the row's driver has an isolate() and it ran
+    template<typename W> static bool call(RowId m) { return (one<W, D>(m) || ...); }
   private:
-    template<typename W, typename Dr> static void one([[maybe_unused]] RowId m) { if constexpr (HasIsolate<Dr>::value) if (W::reg.rows[m].drv == discover::instOf<Dr>()) Dr::isolate(m); }
+    template<typename W, typename Dr> static bool one([[maybe_unused]] RowId m) {
+      if constexpr (HasIsolate<Dr>::value) { if (W::reg.rows[m].drv == discover::instOf<Dr>()) { Dr::isolate(m); return true; } }
+      return false;
+    }
   };
 
   // roughly how long a failed transaction of this kind holds the bus, in weight units, not microseconds: a real
@@ -113,7 +117,7 @@ namespace fail {
     uint16_t flapEwma = 0, costEwma = 0;
     uint16_t flapCount = 0, escalations = 0;
     uint8_t  lastFails = 0, lastRetries = 0, quietPeriods = 0;
-    bool     quarantined = false, probation = false, disconnected = false, probeWindowOpen = false;
+    bool     quarantined = false, probation = false, disconnected = false, probeWindowOpen = false, probing = false;
     uint32_t until = 0;
     uint16_t periodsInProbation = 0;
     FibStep  fib;
@@ -160,7 +164,7 @@ namespace fail {
       for (RowId r = 0; r < W::reg.count; ++r) {
         HealthRow& h = rows[r];
         h.flapEwma = ewma(h.flapEwma, 0);                                  // decay: pulled toward 0 when nothing flapped this period
-        if (h.flapEwma < Cfg::exitQ) { if (h.quietPeriods != 0xFF) ++h.quietPeriods; }
+        if (h.flapEwma < Cfg::exitQ && !h.quarantined) { if (h.quietPeriods != 0xFF) ++h.quietPeriods; }   // a row that is not polled is quiet by construction: that does not cool it
         if (!W::reg.rows[r].isBus) {
           const FailStatus fs = FailStatusFold<Drivers>::template of<W>(r);
           const bool moved = fs.fails != h.lastFails || fs.retries != h.lastRetries;
@@ -188,8 +192,10 @@ namespace fail {
           if (now < h.until) return;                                       // the hard block: not polled at all, no probes to look at
           h.probation = true; return;                                      // elapsed: open-ended probation starts now
         }
-        if (!h.probeWindowOpen) return;                                    // between probe windows: nothing new to decide
-        if (h.flapEwma < Cfg::exitQ && h.costEwma < Cfg::exitD)
+        if (h.probeWindowOpen) { h.probing = true; return; }               // a probe window: the row is polled and ticked this period; what it did is judged at the next tick
+        if (!h.probing) return;                                            // between probe windows: nothing new to decide
+        h.probing = false;                                                 // the window has closed: judge the probe, not the averages that decayed while the row was left alone
+        if (W::reg.status(r) == discover::Status::Alive && h.flapEwma < Cfg::exitQ && h.costEwma < Cfg::exitD)
         { h.quarantined = false; h.probation = false; h.probeWindowOpen = false; h.disconnected = false; return; }
         h.fib.up(Cfg::fibCap); h.probation = false; h.until = now + h.fib.cur * Cfg::quarantineUnitMs;   // still bad on a probe: a fresh, longer hard block
         return;
@@ -199,7 +205,7 @@ namespace fail {
         if (required) { escalate(r, h, overQ && overD ? EscalateReason::Both : overD ? EscalateReason::Cost : EscalateReason::Flap); return; }
         if (!MayIsolateFold<Drivers>::template of<W>(r)) return;                        // Report only: no isolate declared for this row
         h.fib.up(Cfg::fibCap);
-        if (overD) { IsolateFold<Drivers>::template call<W>(r); h.disconnected = true; }
+        if (overD) h.disconnected = IsolateFold<Drivers>::template call<W>(r);
         h.quarantined = true; h.probation = false; h.until = now + h.fib.cur * Cfg::quarantineUnitMs;
       } else if (h.quietPeriods >= Cfg::quietPeriodsToCool) { h.fib.down(); h.quietPeriods = 0; }
     }
