@@ -71,16 +71,25 @@ void setup() {
   Twi::begin();
   Spi::begin();
   RfidApp::discover();
+  const bool rcAfterSpi = RfidApp::reg.count > 1 && Rfid::configured(1);   // before the I2C scan, for the line below
   AirApp::discover();
   table<RfidApp>(F("SPI slots"));
   table<AirApp>(F("I2C"));
   if (RfidApp::reg.count > 1) {
     Serial.print(F("RC522 version 0x")); Serial.print(Rfid::rd(1, rc522::VersionReg), HEX);
-    if (Rfid::configured(1)) Serial.println(F(", configured, antenna on"));
-    else {   // what the chip shows instead: PowerDown (0x10) still set in CommandReg means it never woke from the reset
-      Serial.print(F(", NOT configured (antenna off): CommandReg 0x")); Serial.print(Rfid::rd(1, rc522::CommandReg), HEX);
-      Serial.print(F(" TPrescalerReg 0x")); Serial.println(Rfid::rd(1, rc522::TPrescalerReg), HEX);
-    }
+    Serial.println();
+    // where the RC522's configuration stands: written at init (on which try), still there after the SPI scan, still
+    // there now (after the I2C scan); then one register written and read back, to tell lost writes from a reset since
+    const uint16_t tries = RfidApp::devState<Rfid>(1).initTries;
+    Serial.print(F("RC522 init: "));
+    if (tries) { Serial.print(F("configured on write ")); Serial.print(tries); } else Serial.print(F("never configured"));
+    Serial.print(F(", after SPI scan ")); Serial.print(rcAfterSpi ? F("on") : F("off"));
+    Serial.print(F(", now ")); Serial.print(Rfid::configured(1) ? F("on") : F("off"));
+    Serial.print(F(" (CommandReg 0x")); Serial.print(Rfid::rd(1, rc522::CommandReg), HEX);
+    Serial.print(F(" TPrescalerReg 0x")); Serial.print(Rfid::rd(1, rc522::TPrescalerReg), HEX);
+    Rfid::wr(1, rc522::TReloadRegL, 0x5A);
+    Serial.print(F("), write test: TReloadRegL 0x5A reads 0x")); Serial.println(Rfid::rd(1, rc522::TReloadRegL), HEX);
+    Rfid::wr(1, rc522::TReloadRegL, 0xE8);
   }
 }
 

@@ -32,7 +32,8 @@ namespace rc522 {
     using Ids = discover::IdSet<0x91, 0x92, 0x88, 0x12, 0xB2>;   // v1.0, v2.0, then the common clones (FM17522 and others)
 
     // what the poll found: the card in the field and the errors seen on the way (a BCC mismatch is a corrupt UID)
-    struct DeviceState { uint32_t uid; uint16_t bccErrors, collisions; };
+    // initTries: on which write of the configuration it read back (0: it never did)
+    struct DeviceState { uint32_t uid; uint16_t bccErrors, collisions, initTries; };
 
     static uint8_t rd(RowId row, uint8_t reg) {
       uint8_t io[2] = {uint8_t(((reg << 1) & 0x7E) | 0x80), 0};
@@ -65,7 +66,7 @@ namespace rc522 {
         wr(row, TxASKReg, 0x40);       // 100% ASK
         wr(row, ModeReg, 0x3D);        // CRC preset 0x6363
         wr(row, TxControlReg, uint8_t(rd(row, TxControlReg) | 0x03));   // antenna on
-        if (configured(row)) return;
+        if (configured(row)) { B::dev(row).initTries = uint16_t(i + 1); return; }
       }
     }
 
