@@ -6,14 +6,22 @@
 // Slot 1 (D4) is declared with nothing on it: the scan reports it empty.
 //
 // Line format: <ms> <name>[<row>]=<value>   a card's UID in hex when one arrives, 0 when it leaves (after 3 polls
-// without it). miss[1]=<n>: polls in a row that found no card while one is held.
+// without it, or when the reader stops answering). miss[1]=<n>: polls in a row that found no card while one is held.
+//              rfid[1] stale | gone | alive, init #<n> | reinit, init #<n>    the reader's row, and how often it was initialised
+//
+// The reader is under failure handling (fail::DevEdge): a reader that stops answering goes Stale, is probed, and is initialised again when
+// it answers; one that was reset without the sketch knowing (its configuration gone) is initialised again at once. Faults, from the serial monitor:
+//   v   RST low for 3 s: the reader vanishes
+//   p   RST low for 1 ms: a silent reset, the reader still answers and has lost its configuration
 #include <Arduino.h>
+#undef bit   // Arduino's bit(b) macro; fail:: has its own bit(Kind)
 #include <chips/esp8266/esp8266Twi.h>
 #include <chips/esp8266/esp8266Spi.h>
 #include <chips/esp8266/esp8266Gpio.h>
 #include <oneMachine/discover/registry.h>
 #include <oneMachine/discover/identify.h>
 #include <oneMachine/discover/spi.h>
+#include <oneMachine/fail/world.h>
 #include "rc522.h"
 #include "bmp280.h"
 
@@ -52,9 +60,22 @@ struct Printer {
 
 struct RfidApp;
 struct AirApp;
-using Rfid = rc522::Rc522<RfidApp>;
+
+struct RfidMode {
+  static constexpr bool lifecycle = true, returnPath = false, idempotent = true;
+  template<typename E> using DevStack = fail::Controller<E, fail::TickPart<fail::Retry<2>>, fail::Recover, fail::DetectError,
+    fail::HoldOp<fail::Coalesce>, fail::Gate<50>, fail::TickPart<fail::Reprobe<500, 120>>, fail::LazyStatus>;
+  template<typename Impl, typename W> using Access = fail::SpiAccess<Impl, W>;
+};
+using Rfid = rc522::Rc522<RfidApp, RfidMode, 1>;
 struct RfidApp : discover::World<RfidApp, Spi, Chain<Printer>, Chain<Rfid>, 3, discover::SpiScan,
-                                 Chain<discover::SpiSlotIds<Spi::slots>>> {};
+                                 Chain<discover::SpiSlotIds<Spi::slots>>> {
+  static constexpr bool lifecycle = true;
+  static void release(RowId) {}
+  static void unbindAll() {}
+};
+using RfidTicker = fail::Ticks<RfidApp, RfidApp::DriverList>;
+constexpr uint8_t rstPin = 16;   // D0: the RC522's RST
 struct AirApp  : discover::World<AirApp, Twi, Chain<Printer>, bmp::Entries<AirApp>, 3, discover::I2cScan> {};
 
 template<typename A> static void table(const __FlashStringHelper* bus) {
@@ -69,7 +90,7 @@ void setup() {
   delay(200);
   Serial.println(F("\nOneMachine SPI + I2C discovery"));
   Serial.println(F("build " BUILD_REV " " __DATE__ " " __TIME__));
-  esp::OutPin<16>::begin(); esp::OutPin<16>::on();   // RC522 RST high: a chip select on this pin would reset it
+  esp::OutPin<rstPin>::begin(); esp::OutPin<rstPin>::on();   // RC522 RST high; a chip select on this pin would reset it
   Twi::begin();
   Spi::begin();
   RfidApp::discover();
@@ -95,14 +116,50 @@ void setup() {
   }
 }
 
+// the reader's row: a status change, and each initialisation
+static void logRfid() {
+  static discover::Status last = discover::Status::Gone;   // nothing reported yet
+  static uint16_t lastInits = 0;
+  if (RfidApp::reg.count < 2) return;
+  const discover::Status st = RfidApp::reg.status(1);
+  const uint16_t inits = RfidApp::devState<Rfid>(1).inits;
+  if (st != last) {
+    Serial.print(millis()); Serial.print(F(" rfid[1] "));
+    if (st == discover::Status::Alive) { Serial.print(F("alive, init #")); Serial.println(inits); }
+    else Serial.println(st == discover::Status::Stale ? F("stale") : F("gone"));
+    last = st; lastInits = inits;
+  } else if (inits != lastInits) {
+    lastInits = inits;
+    Serial.print(millis()); Serial.print(F(" rfid[1] reinit, init #")); Serial.println(inits);
+  }
+}
+
+// the fault script: a serial key, no schedule
+static void faults(uint32_t now) {
+  static uint32_t vanishEnd = 0;
+  static bool vanished = false;
+  if (Serial.available()) {
+    const int c = Serial.read();
+    if (c == 'v' && !vanished) { Serial.print(now); Serial.println(F(" fault: RST low 3 s")); esp::OutPin<rstPin>::off(); vanished = true; vanishEnd = now + 3000; }
+    else if (c == 'p' && !vanished) {
+      Serial.print(now); Serial.println(F(" fault: RST pulse"));
+      esp::OutPin<rstPin>::off(); delayMicroseconds(1000); esp::OutPin<rstPin>::on();
+    }
+  }
+  if (vanished && int32_t(now - vanishEnd) >= 0) { esp::OutPin<rstPin>::on(); vanished = false; Serial.print(now); Serial.println(F(" fault: RST high")); }
+}
+
 void loop() {
   static uint32_t nextCard = 0, nextAir = 0;
   const uint32_t now = millis();
+  faults(now);
   if (int32_t(now - nextCard) >= 0) {
     nextCard = now + 100;  RfidApp::pump();
-    static uint8_t lastMiss = 0;   // a card held still that misses polls: the streak, printed when it changes
+    static uint8_t lastMiss = 0;   // a card held still that misses polls: the streak, printed when it grows
     const uint8_t miss = RfidApp::reg.count > 1 ? RfidApp::devState<Rfid>(1).missStreak : 0;
-    if (miss != lastMiss) { lastMiss = miss; Serial.print(now); Serial.print(F(" miss[1]=")); Serial.println(miss); }
+    if (miss != lastMiss) { lastMiss = miss; if (miss) { Serial.print(millis()); Serial.print(F(" miss[1]=")); Serial.println(miss); } }
   }
+  RfidTicker::run(now);
+  logRfid();
   if (int32_t(now - nextAir)  >= 0) { nextAir  = now + 1000; AirApp::pump(); }
 }
