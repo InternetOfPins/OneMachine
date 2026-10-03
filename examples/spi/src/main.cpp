@@ -104,6 +104,7 @@ void setup() {
   Serial.println(F("\nOneMachine SPI + I2C discovery"));
   Serial.println(F("build " BUILD_REV " " __DATE__ " " __TIME__));
   esp::OutPin<pwrPin>::begin(); esp::OutPin<pwrPin>::off();   // RC522 supply on (low), when switched
+  delay(50);                                                  // let the module come up before discovery
   esp::OutPin<rstPin>::begin(); esp::OutPin<rstPin>::on();   // RC522 RST high; a chip select on this pin would reset it
   Twi::begin();
   Spi::begin();

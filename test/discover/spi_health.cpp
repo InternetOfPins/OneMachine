@@ -2,7 +2,7 @@
 //   - single, spaced faults (RST held low 3 s, an RST pulse) are not quarantined
 //   - a reader that comes and goes about once a second: quarantined on the flap rate alone
 //   - a part that answers its ID and keeps nothing written (VCC pulled, living off its signal pins) flaps and costs: the row is quarantined,
-//     is not touched during a hard block, is quarantined again each time it flaps back, and the blocks grow
+//     is not touched outside a probe window, stays quarantined while its probes find it bad, and the blocks grow
 //   - once the part is well again the row stays quiet: quarantine clears and the card is read again
 //   - the I2C-free ownStale: a device row's own fault counts, a bus row's never does
 // Native only. Time is simulated: the poll every 100 ms, the failure edge and the monitor ticked every 10 ms.
@@ -118,32 +118,32 @@ int main() {
   uint32_t t0 = now;
   while (now - t0 < 30000 && !hr().quarantined) advance(10);
   CHECK(hr().quarantined && now - t0 <= 20000);                          // quarantined within seconds
-  const uint32_t qAt = now;
-
+  
   // the hard block: nothing on the slot
   advance(100);                                                          // let the poll in flight finish
   const uint32_t b0 = State::bytes[0];
   advance(1500);
   CHECK(hr().quarantined && !hr().probation && State::bytes[0] == b0);
 
-  // while the part stays bad it keeps being quarantined, each block longer than the first (Fibonacci x 2 s); a block never touches the slot
+  // while the part stays bad, each probe finds it still bad: it stays quarantined and each block is longer than the last (Fibonacci x 2 s);
+  // outside a probe window nothing reaches the slot
   uint16_t maxFib = hr().fib.cur;
-  uint8_t  blocks = 1;
-  bool     was = true, touched = false;
-  uint32_t blockBytes = State::bytes[0], longest = 0, entered = qAt;
+  bool     leftEarly = false, touched = false;
+  uint32_t seen = State::bytes[0], windows = 0;
+  bool     wasOpen = false;
   for (uint32_t t = 0; t < 120000; t += 10) {
     advance(10);
-    const bool q = hr().quarantined;
-    if (q && !was) { ++blocks; blockBytes = State::bytes[0]; entered = now; }
-    if (!q && was && now - entered > longest) longest = now - entered;
-    if (q && !hr().probeWindowOpen && State::bytes[0] != blockBytes) touched = true;   // a poll or a tick reached the slot inside a block
-    was = q;
+    if (!hr().quarantined) leftEarly = true;
+    if (hr().probeWindowOpen) { seen = State::bytes[0]; if (!wasOpen) ++windows; }
+    else if (wasOpen) seen = State::bytes[0];                            // the step in which the window closes: the row's own tick ran just before it
+    else if (State::bytes[0] != seen) touched = true;                    // a poll or a tick reached the slot outside a probe window
+    wasOpen = hr().probeWindowOpen;
     if (hr().fib.cur > maxFib) maxFib = hr().fib.cur;
   }
   CHECK(!touched);
-  CHECK(blocks >= 3);                                                    // quarantined again each time it flapped back
-  CHECK(maxFib >= 3);                                                    // the back-off grew (the quiet time inside a block cools it again: it settles)
-  CHECK(longest >= 6000);                                                // and so did the block (4 s, then 6 s, ...)
+  CHECK(!leftEarly);                                                     // the probes found it still bad: no release on averages that decayed in the block
+  CHECK(windows >= 3);                                                   // it was probed, repeatedly
+  CHECK(maxFib >= 5);                                                    // and each failed probe lengthened the block
 
   // the part is well again: a probe finds it quiet, quarantine clears, the card is read again
   State::rc.noStore = false;
