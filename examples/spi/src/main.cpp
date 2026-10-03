@@ -16,6 +16,10 @@
 #include "rc522.h"
 #include "bmp280.h"
 
+#ifndef BUILD_REV
+  #define BUILD_REV "unknown"   // set by ../version.py: each repo's git commit
+#endif
+
 using discover::RowId;
 using hapi::Chain;
 namespace esp = hw::esp8266;
@@ -63,6 +67,7 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println(F("\nOneMachine SPI + I2C discovery"));
+  Serial.println(F("build " BUILD_REV " " __DATE__ " " __TIME__));
   Twi::begin();
   Spi::begin();
   RfidApp::discover();
