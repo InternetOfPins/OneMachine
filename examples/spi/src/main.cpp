@@ -75,7 +75,8 @@ void setup() {
   table<RfidApp>(F("SPI slots"));
   table<AirApp>(F("I2C"));
   if (RfidApp::reg.count > 1) {
-    Serial.print(F("RC522 version 0x")); Serial.println(Rfid::rd(1, rc522::VersionReg), HEX);
+    Serial.print(F("RC522 version 0x")); Serial.print(Rfid::rd(1, rc522::VersionReg), HEX);
+    Serial.println(Rfid::configured(1) ? F(", configured, antenna on") : F(", NOT configured (antenna off)"));
   }
 }
 
