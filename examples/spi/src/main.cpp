@@ -76,7 +76,11 @@ void setup() {
   table<AirApp>(F("I2C"));
   if (RfidApp::reg.count > 1) {
     Serial.print(F("RC522 version 0x")); Serial.print(Rfid::rd(1, rc522::VersionReg), HEX);
-    Serial.println(Rfid::configured(1) ? F(", configured, antenna on") : F(", NOT configured (antenna off)"));
+    if (Rfid::configured(1)) Serial.println(F(", configured, antenna on"));
+    else {   // what the chip shows instead: PowerDown (0x10) still set in CommandReg means it never woke from the reset
+      Serial.print(F(", NOT configured (antenna off): CommandReg 0x")); Serial.print(Rfid::rd(1, rc522::CommandReg), HEX);
+      Serial.print(F(" TPrescalerReg 0x")); Serial.println(Rfid::rd(1, rc522::TPrescalerReg), HEX);
+    }
   }
 }
 
