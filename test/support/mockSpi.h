@@ -18,7 +18,7 @@ namespace mspi {
 
   enum class Kind : uint8_t { Empty, Rc522, Bmx, Plain };
 
-  struct Card { bool present; uint8_t uid[4]; bool badBcc, collide; bool ready; };
+  struct Card { bool present; uint8_t uid[4]; bool badBcc, collide; bool ready; uint8_t mute = 0; };   // mute: wake-ups left to ignore
 
   struct Rc522Model {
     uint8_t regs[64];
@@ -67,6 +67,7 @@ namespace mspi {
       n = 0; regs[0x06] = 0;
       const bool antenna = (regs[0x14] & 0x03) == 0x03;
       if (antenna && card.present && len == 1 && (in[0] == 0x52 || in[0] == 0x26)) {
+        if (card.mute) { --card.mute; regs[0x04] |= 0x01; return; }   // a held card that does not answer this wake-up
         if (card.ready) { card.ready = false; regs[0x04] |= 0x01; return; }   // READY + an unexpected command: back to IDLE, silent
         card.ready = true; push(0x04); push(0x00); regs[0x04] |= 0x30; return;
       }

@@ -33,7 +33,9 @@ namespace rc522 {
 
     // what the poll found: the card in the field and the errors seen on the way (a BCC mismatch is a corrupt UID)
     // initTries: on which write of the configuration it read back (0: it never did)
-    struct DeviceState { uint32_t uid; uint16_t bccErrors, collisions, initTries; };
+    // missStreak: consecutive polls that found no card while a UID is held; a departure is emitted at missPolls
+    struct DeviceState { uint32_t uid; uint16_t bccErrors, collisions, initTries; uint8_t missStreak; };
+    static constexpr uint8_t missPolls = 3;
 
     static uint8_t rd(RowId row, uint8_t reg) {
       uint8_t io[2] = {uint8_t(((reg << 1) & 0x7E) | 0x80), 0};
@@ -105,7 +107,11 @@ namespace rc522 {
     static void read(RowId row) {
       auto& st = B::dev(row);
       uint32_t uid = 0;
-      if (present(row)) {
+      if (!present(row)) {
+        if (!st.uid) return;
+        if (++st.missStreak < missPolls) return;   // a card held still can miss a poll: it left only after missPolls
+      } else {
+        st.missStreak = 0;
         const uint8_t anticoll[2] = {0x93, 0x20};   // cascade level 1, no UID bits known
         uint8_t r[5];
         const int8_t got = transceive(row, anticoll, 2, r, 5, 0x00);
@@ -114,7 +120,7 @@ namespace rc522 {
         if (uint8_t(r[0] ^ r[1] ^ r[2] ^ r[3]) != r[4]) { ++st.bccErrors; return; }
         uid = (uint32_t(r[0]) << 24) | (uint32_t(r[1]) << 16) | (uint32_t(r[2]) << 8) | r[3];
       }
-      if (uid != st.uid) { st.uid = uid; B::template emit<Card>(row, uid); }
+      if (uid != st.uid) { st.uid = uid; st.missStreak = 0; B::template emit<Card>(row, uid); }
     }
   };
 
