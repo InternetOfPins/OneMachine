@@ -4,7 +4,7 @@
 //   - an empty slot (idle MISO high or low, or floating noise) and a stuck-low MISO give no row
 //   - a Fixed slot gets its row without one byte of traffic, and no other entry probes it
 //   - the real RC522 driver (examples/spi/src/rc522.h) over the register model: init, a card's UID once on arrival,
-//     0 on departure, the READY quirk, a corrupt BCC and a collision counted, never emitted
+//     0 on departure (after 3 polls without it), the READY quirk, a corrupt BCC and a collision counted, never emitted
 #include <stdint.h>
 #include <cstdio>
 #include <hapi/hapi.h>
@@ -150,9 +150,23 @@ int main() {
   CHECK(CardLog::n == 1);
   CHECK(App::devState<Rfid>(rf).uid == 0xDEADBEEFu);
 
-  State::card.present = false;
+  // a held card that misses a poll (a poll is two wake-ups): no departure, and the streak restarts when it answers
+  State::card.mute = 2;
   App::pump();
-  CHECK(CardLog::n == 2 && CardLog::log[1] == 0);  // the card left
+  CHECK(CardLog::n == 1 && App::devState<Rfid>(rf).missStreak == 1);
+  App::pump();
+  CHECK(CardLog::n == 1 && App::devState<Rfid>(rf).missStreak == 0);
+  State::card.mute = 4;                            // two missed polls, then it answers
+  App::pump(); App::pump(); App::pump();
+  CHECK(CardLog::n == 1 && App::devState<Rfid>(rf).missStreak == 0);
+
+  State::card.present = false;                     // the card left: 3 polls in a row without it
+  App::pump(); App::pump();
+  CHECK(CardLog::n == 1 && App::devState<Rfid>(rf).missStreak == 2);
+  App::pump();
+  CHECK(CardLog::n == 2 && CardLog::log[1] == 0 && App::devState<Rfid>(rf).missStreak == 0);
+  App::pump();
+  CHECK(CardLog::n == 2);                          // no card, no UID held: nothing more
 
   State::card = mspi::Card{true, {0x01, 0x02, 0x03, 0x04}, true, false, false};
   App::pump();

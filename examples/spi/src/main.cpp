@@ -5,7 +5,8 @@
 //   BMP280   SDA D2, SCL D1, 3V3, GND (CSB high or open: I2C mode)
 // Slot 1 (D4) is declared with nothing on it: the scan reports it empty.
 //
-// Line format: <ms> <name>[<row>]=<value>   a card's UID in hex when one arrives, 0 when it leaves.
+// Line format: <ms> <name>[<row>]=<value>   a card's UID in hex when one arrives, 0 when it leaves (after 3 polls
+// without it). miss[1]=<n>: polls in a row that found no card while one is held.
 #include <Arduino.h>
 #include <chips/esp8266/esp8266Twi.h>
 #include <chips/esp8266/esp8266Spi.h>
@@ -97,6 +98,11 @@ void setup() {
 void loop() {
   static uint32_t nextCard = 0, nextAir = 0;
   const uint32_t now = millis();
-  if (int32_t(now - nextCard) >= 0) { nextCard = now + 100;  RfidApp::pump(); }
+  if (int32_t(now - nextCard) >= 0) {
+    nextCard = now + 100;  RfidApp::pump();
+    static uint8_t lastMiss = 0;   // a card held still that misses polls: the streak, printed when it changes
+    const uint8_t miss = RfidApp::reg.count > 1 ? RfidApp::devState<Rfid>(1).missStreak : 0;
+    if (miss != lastMiss) { lastMiss = miss; Serial.print(now); Serial.print(F(" miss[1]=")); Serial.println(miss); }
+  }
   if (int32_t(now - nextAir)  >= 0) { nextAir  = now + 1000; AirApp::pump(); }
 }
