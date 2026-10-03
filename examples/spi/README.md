@@ -20,11 +20,11 @@ Wemos D1 mini (ESP8266), everything at 3.3V.
 | D6 (GPIO12) | MISO | |
 | D7 (GPIO13) | MOSI | |
 | D8 (GPIO15) | SDA (its chip select) | |
-| D3 or 3V3 | RST | |
+| D0 or 3V3 | RST | D0 is held high by the sketch; it must not be a chip select |
 | D2 (GPIO4) | | SDA |
 | D1 (GPIO5) | | SCL |
 
-Slot 1 is D0 (GPIO16) with nothing on it: the scan reports it empty.
+Slot 1 is D4 (GPIO2) with nothing on it: the scan reports it empty.
 
 ## Build and flash
 
