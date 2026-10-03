@@ -1,9 +1,9 @@
 // spi -- discovery on two buses of one board: an RC522 RFID reader found on an SPI bus whose chip selects are declared
 // statically (one slot each), and a BMP280/BME280 found on I2C. Each bus is its own World: discover once, pump on its
 // own period. Wemos D1 mini (ESP8266), Serial 115200. Wiring:
-//   RC522    SCK D5, MISO D6, MOSI D7, SDA (its CS) D8, RST D3 or 3V3, 3V3, GND
+//   RC522    SCK D5, MISO D6, MOSI D7, SDA (its CS) D8, RST D0 (held high here) or 3V3, 3V3, GND
 //   BMP280   SDA D2, SCL D1, 3V3, GND (CSB high or open: I2C mode)
-// Slot 1 (D0) is declared with nothing on it: the scan reports it empty.
+// Slot 1 (D4) is declared with nothing on it: the scan reports it empty.
 //
 // Line format: <ms> <name>[<row>]=<value>   a card's UID in hex when one arrives, 0 when it leaves.
 #include <Arduino.h>
@@ -25,7 +25,7 @@ using hapi::Chain;
 namespace esp = hw::esp8266;
 
 using Twi = esp::Esp8266TwiMaster<4, 5, 100000>;                                      // SDA D2, SCL D1
-using Spi = hapi::APIOf<oneBus::SpiAPI, oneBus::SpiSlots<esp::OutPin<15>, esp::OutPin<16>>,   // slot 0 D8, slot 1 D0
+using Spi = hapi::APIOf<oneBus::SpiAPI, oneBus::SpiSlots<esp::OutPin<15>, esp::OutPin<2>>,   // slot 0 D8, slot 1 D4
                         oneBus::SpiMaster<4000000>, esp::Esp8266SpiCore>;
 
 struct Printer {
@@ -68,6 +68,7 @@ void setup() {
   delay(200);
   Serial.println(F("\nOneMachine SPI + I2C discovery"));
   Serial.println(F("build " BUILD_REV " " __DATE__ " " __TIME__));
+  esp::OutPin<16>::begin(); esp::OutPin<16>::on();   // RC522 RST high: a chip select on this pin would reset it
   Twi::begin();
   Spi::begin();
   RfidApp::discover();
