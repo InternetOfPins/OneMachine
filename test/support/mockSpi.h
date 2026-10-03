@@ -24,11 +24,14 @@ namespace mspi {
     uint8_t regs[64];
     uint8_t fifo[16]; uint8_t n;
     uint8_t resetReads;   // CommandReg reads PowerDown this many times after a SoftReset
+    uint8_t deaf;         // then this many accesses while the oscillator starts: writes are lost, reads give the
+                          // reset value of CommandReg (0x20, PowerDown clear) and 0 elsewhere -- no flag says it is over
     void reset(uint8_t version) {
       for (auto& r : regs) r = 0;
-      regs[0x37] = version; regs[0x14] = 0x80; n = 0; resetReads = 0;
+      regs[0x37] = version; regs[0x14] = 0x80; n = 0; resetReads = 0; deaf = 0;
     }
     uint8_t read(uint8_t reg) {
+      if (deaf) { --deaf; return reg == 0x01 ? 0x20 : 0; }
       if (reg == 0x09) { if (!n) return 0; const uint8_t v = fifo[0]; for (uint8_t i = 1; i < n; ++i) fifo[i - 1] = fifo[i]; --n; return v; }
       if (reg == 0x0A) return n;
       if (reg == 0x01 && resetReads) { --resetReads; return 0x10; }
@@ -36,12 +39,13 @@ namespace mspi {
     }
     void push(uint8_t b) { if (n < 16) fifo[n++] = b; }
     void write(uint8_t reg, uint8_t v, Card& card) {
+      if (deaf) { --deaf; return; }
       reg &= 0x3F;
       switch (reg) {
         case 0x09: push(v); return;
         case 0x0A: if (v & 0x80) n = 0; return;
         case 0x04: if (v & 0x80) regs[reg] |= (v & 0x7F); else regs[reg] &= uint8_t(~v); return;   // Set1 bit
-        case 0x01: regs[reg] = v; if (v == 0x0F) { const uint8_t ver = regs[0x37]; reset(ver); resetReads = 3; } return;
+        case 0x01: regs[reg] = v; if (v == 0x0F) { const uint8_t ver = regs[0x37]; reset(ver); resetReads = 3; deaf = 40; } return;
         case 0x0D:
           regs[reg] = v;
           if ((v & 0x80) && regs[0x01] == 0x0C) transceive(card);

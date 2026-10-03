@@ -44,16 +44,27 @@ namespace rc522 {
       B::xfer(row, io, nullptr, 2);
     }
 
+    // the configuration init() writes, read back: only a chip whose oscillator runs keeps what is written
+    static bool configured(RowId row) {
+      return rd(row, TPrescalerReg) == 0xA9 && rd(row, TReloadRegL) == 0xE8 && (rd(row, TxControlReg) & 0x03) == 0x03;
+    }
+
+    // A SoftReset restarts the oscillator, and no flag reliably says when it is running again (PowerDown may read
+    // clear the whole time): writes made meanwhile are lost, the antenna stays off and no card ever answers. So the
+    // configuration is written until it reads back.
     static void init(RowId row) {
       wr(row, CommandReg, SoftReset);
-      for (uint16_t i = 0; i < 1000 && (rd(row, CommandReg) & 0x10); ++i) {}   // PowerDown clears when the reset is done
-      wr(row, TModeReg, 0x80);       // timer starts at the end of a transmission
-      wr(row, TPrescalerReg, 0xA9);  // 40 kHz tick
-      wr(row, TReloadRegH, 0x03);    // 1000 ticks: a 25 ms receive timeout
-      wr(row, TReloadRegL, 0xE8);
-      wr(row, TxASKReg, 0x40);       // 100% ASK
-      wr(row, ModeReg, 0x3D);        // CRC preset 0x6363
-      wr(row, TxControlReg, uint8_t(rd(row, TxControlReg) | 0x03));   // antenna on
+      for (uint16_t i = 0; i < 1000; ++i) {
+        if (rd(row, CommandReg) & 0x10) continue;   // PowerDown: the reset is still running
+        wr(row, TModeReg, 0x80);       // timer starts at the end of a transmission
+        wr(row, TPrescalerReg, 0xA9);  // 40 kHz tick
+        wr(row, TReloadRegH, 0x03);    // 1000 ticks: a 25 ms receive timeout
+        wr(row, TReloadRegL, 0xE8);
+        wr(row, TxASKReg, 0x40);       // 100% ASK
+        wr(row, ModeReg, 0x3D);        // CRC preset 0x6363
+        wr(row, TxControlReg, uint8_t(rd(row, TxControlReg) | 0x03));   // antenna on
+        if (configured(row)) return;
+      }
     }
 
     // one exchange with a card: FIFO in, Transceive, wait for the receive (or the timer), FIFO out.
