@@ -22,7 +22,7 @@ namespace rc522 {
   struct Card { using Value = uint32_t; static constexpr uint8_t id = 20, decimals = 0; static constexpr const char* name = "card"; };
 
   enum Reg : uint8_t {
-    CommandReg = 0x01, ComIrqReg = 0x04, ErrorReg = 0x06, FIFODataReg = 0x09, FIFOLevelReg = 0x0A,
+    CommandReg = 0x01, ComIEnReg = 0x02, DivIEnReg = 0x03, ComIrqReg = 0x04, ErrorReg = 0x06, FIFODataReg = 0x09, FIFOLevelReg = 0x0A,
     ControlReg = 0x0C, BitFramingReg = 0x0D, CollReg = 0x0E, ModeReg = 0x11, TxControlReg = 0x14, TxASKReg = 0x15,
     TModeReg = 0x2A, TPrescalerReg = 0x2B, TReloadRegH = 0x2C, TReloadRegL = 0x2D, VersionReg = 0x37,
   };
@@ -36,6 +36,22 @@ namespace rc522 {
     static_assert(enterQ > exitQ, "Health: enter threshold must exceed exit threshold (hysteresis)");
   };
 
+  // The IRQ pin, optional: a mode that has `using Irq = X` makes transceive() wait on X::wait() instead of polling ComIrqReg.
+  // X::pushPull is written to DivIEnReg at init. X::enable is written to ComIEnReg once the command's requests are cleared and X::idle (IRqInv only) when it is done, with the
+  // requests cleared again: the line is low only while a command is in flight, never while the chip waits for the next poll
+  // (a pin shared with a boot strapping input must be high across a host reset). X::arm() runs before each command is started,
+  // X::wait() returns true when the line fired (an interrupt flag, or a sampled level), X::seen(irq, fired) is told the ComIrqReg value read afterwards.
+  struct NoIrq {
+    static constexpr bool on = false;
+    static constexpr uint8_t enable = 0, idle = 0, pushPull = 0;
+    static void arm() {}
+    static bool wait() { return false; }
+    static void seen(uint8_t, bool) {}
+  };
+  template<typename...> using Void = void;
+  template<typename M, typename = void> struct IrqOf { using type = NoIrq; };
+  template<typename M> struct IrqOf<M, Void<typename M::Irq>> { using type = typename M::Irq; };
+
   // no failure handling: the driver polls and nothing is retried, probed or reported
   struct NoFail {
     static constexpr bool lifecycle = false, returnPath = false, idempotent = true;
@@ -47,6 +63,7 @@ namespace rc522 {
   struct Rc522 : discover::SpiDriverBase<Rc522<W, M, K>, W>, fail::DevEdge<Rc522<W, M, K>, W, M, K> {
     using B    = discover::SpiDriverBase<Rc522, W>;
     using Edge = fail::DevEdge<Rc522, W, M, K>;
+    using Irq  = typename IrqOf<M>::type;
     using Produces = hapi::Chain<Card>;
     static constexpr bool mayIsolate = true;   // a health monitor may quarantine the row (it has no isolate(): nothing cuts its supply)
     static constexpr uint8_t recoverMask = fail::bit(fail::Kind::Corrupt);   // a reset the host did not see: init again
@@ -99,6 +116,7 @@ namespace rc522 {
         wr(row, TxASKReg, 0x40);       // 100% ASK
         wr(row, ModeReg, 0x3D);        // CRC preset 0x6363
         wr(row, TxControlReg, uint8_t(rd(row, TxControlReg) | 0x03));   // antenna on
+        if constexpr (Irq::on) wr(row, DivIEnReg, Irq::pushPull);       // IRQ pin driven, not open-drain
         if (configured(row)) { B::dev(row).initTries = uint16_t(i + 1); return; }
       }
     }
@@ -108,13 +126,22 @@ namespace rc522 {
     static int8_t transceive(RowId row, const uint8_t* tx, uint8_t n, uint8_t* rx, uint8_t max, uint8_t lastBits) {
       wr(row, CommandReg, Idle);
       wr(row, ComIrqReg, 0x7F);             // clear every interrupt request bit
+      if constexpr (Irq::on) { Irq::arm(); wr(row, ComIEnReg, Irq::enable); }
       wr(row, FIFOLevelReg, 0x80);          // flush the FIFO
       for (uint8_t i = 0; i < n; ++i) wr(row, FIFODataReg, tx[i]);
       wr(row, BitFramingReg, lastBits);
       wr(row, CommandReg, Transceive);
       wr(row, BitFramingReg, uint8_t(lastBits | 0x80));   // StartSend
       uint8_t irq = 0;
-      for (uint16_t i = 0; i < 2000; ++i) { irq = rd(row, ComIrqReg); if (irq & 0x31) break; }   // RxIRq, IdleIRq, TimerIRq
+      if constexpr (Irq::on) {
+        const bool fired = Irq::wait();
+        irq = rd(row, ComIrqReg);
+        wr(row, ComIEnReg, Irq::idle);        // line released before the requests are cleared
+        wr(row, ComIrqReg, 0x7F);
+        Irq::seen(irq, fired);
+      } else {
+        for (uint16_t i = 0; i < 2000; ++i) { irq = rd(row, ComIrqReg); if (irq & 0x31) break; }   // RxIRq, IdleIRq, TimerIRq
+      }
       wr(row, BitFramingReg, 0x00);
       if (!(irq & 0x30)) return 0;          // the timer ran out (or the loop did): no card answered
       if (rd(row, ErrorReg) & 0x1B) return -1;   // BufferOvfl, CollErr, ParityErr, ProtocolErr

@@ -20,15 +20,17 @@ Wemos D1 mini (ESP8266), everything at 3.3V.
 | D6 (GPIO12) | MISO | |
 | D7 (GPIO13) | MOSI | |
 | D8 (GPIO15) | SDA (its chip select) | |
-| D0 or 3V3 | RST | D0 is held high by the sketch; it must not be a chip select |
+| D4 (GPIO2) | RST | held high by the sketch (the fault keys pull it low); or 3V3 |
+| D0 (GPIO16) | IRQ | |
 | D2 (GPIO4) | | SDA |
 | D1 (GPIO5) | | SCL |
 
 Slot 1 is D3 (GPIO0) with nothing on it: the scan reports it empty.
 
-Optional: D4 (GPIO2) is held low as a supply switch for the RC522's VCC (a PNP transistor, for example a 2N2907: emitter
-to 3V3, collector to VCC, base through 1 k to D4; D4 is high at reset, so the RC522 is off until the sketch starts).
-Keys `x` and `l` below cut it for 3 s or 30 s. Without a switch there, they change nothing.
+D0 (GPIO16) is the RC522's IRQ input (push-pull, active low, set by the driver). The receive wait of each poll is this line instead
+of reads of ComIrqReg; the ESP8266 has no interrupt on GPIO16, so it is sampled, and ComIrqReg then tells RxIRq from TimerIRq. Requests
+are enabled only while a command runs. Keep the IRQ off the boot strapping pins (D3, D4, D8): the RC522 keeps its state across a reset
+of the board, and a pending request would hold such a pin low at the next boot.
 
 ## Build and flash
 
@@ -69,13 +71,12 @@ first three bytes (cascade level 1 only).
 
 ## Faults
 
-Type a key in the serial monitor to drive RC522 RST (D0) from the sketch:
+Type a key in the serial monitor to drive RC522 RST (D4) from the sketch:
 
 | Key | Fault | Log |
 | --- | --- | --- |
 | `v` | RST low for 3 s: the reader vanishes | `rfid[1] stale`, `card[1]=0` if a card was held, then `rfid[1] alive, init #n` after release |
 | `p` | RST low for 1 ms: a silent reset, the ID still answers | `rfid[1] reinit, init #n`, the row stays Alive |
-| `x`, `l` | supply off for 3 s, or 30 s (with the switch on D4) | as `v`; the chip may still answer through its signal pins, so it can flap before it goes quiet |
 
 A card that picks a new UID each time its field restarts (random-UID tags, phones; UIDs starting `08`) shows a new
 UID after every fault.
