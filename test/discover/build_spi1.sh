@@ -9,6 +9,8 @@ cd "$(dirname "$0")"
 INC="-I ../../include -I ../../../HAPI/include -I ../../../OneBus/include"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 rc=0
+# run a test binary: its last line, and a failure (its exit status, not tail's) when it does not exit 0
+run() { local o s; o=$("$@" 2>&1); s=$?; printf '%s\n' "$o" | tail -1; if [ $s -ne 0 ]; then echo "FAIL: $* exited $s"; printf '%s\n' "$o" | head -4; rc=1; fi; }
 
 echo "=== native g++ $(g++ -dumpversion) -O2 ==="
 g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $INC spi1.cpp -o "$OUT/s1"
@@ -16,32 +18,32 @@ g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $INC spi1.cpp -o "$OUT/s1"
 
 echo; echo "=== native -O1 -fsanitize=address,undefined ==="
 g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC spi1.cpp -o "$OUT/s1san"
-"$OUT/s1san" | tail -1 || rc=1
+run "$OUT/s1san"
 
 if command -v clang++ >/dev/null; then
   echo; echo "=== native clang++ $(clang++ -dumpversion) -O2 ==="
   clang++ -std=c++17 -O2 -Wall -Wextra $INC spi1.cpp -o "$OUT/s1clang"
-  "$OUT/s1clang" | tail -1 || rc=1
+  run "$OUT/s1clang"
 fi
 
 echo; echo "=== RC522 under the failure edge (spi_fail.cpp): g++ -O2, then ASan/UBSan ==="
 g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $INC spi_fail.cpp -o "$OUT/sf"
 "$OUT/sf" || rc=1
 g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC spi_fail.cpp -o "$OUT/sfsan"
-"$OUT/sfsan" | tail -1 || rc=1
+run "$OUT/sfsan"
 if command -v clang++ >/dev/null; then
   clang++ -std=c++17 -O2 -Wall -Wextra $INC spi_fail.cpp -o "$OUT/sfclang"
-  "$OUT/sfclang" | tail -1 || rc=1
+  run "$OUT/sfclang"
 fi
 
 echo; echo "=== RC522 under the health monitor (spi_health.cpp): g++ -O2, then ASan/UBSan ==="
 g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $INC spi_health.cpp -o "$OUT/sh"
 "$OUT/sh" || rc=1
 g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC spi_health.cpp -o "$OUT/shsan"
-"$OUT/shsan" | tail -1 || rc=1
+run "$OUT/shsan"
 if command -v clang++ >/dev/null; then
   clang++ -std=c++17 -O2 -Wall -Wextra $INC spi_health.cpp -o "$OUT/shclang"
-  "$OUT/shclang" | tail -1 || rc=1
+  run "$OUT/shclang"
 fi
 
 echo; echo "=== compile-fail guards (each must be rejected with its own message) ==="
