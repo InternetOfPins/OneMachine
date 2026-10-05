@@ -152,10 +152,13 @@ jobs:
           git clone --depth 1 $ORG/HAPI.git HAPI
           git clone --depth 1 --branch "$BRANCH" $ORG/OneBus.git OneBus || git clone --depth 1 $ORG/OneBus.git OneBus
           git clone --depth 1 --branch "$BRANCH" $ORG/OneChip.git OneChip || git clone --depth 1 $ORG/OneChip.git OneChip
+          # the spi example's air sensor is a machine of OneMenu nodes: OneData and OneMenu, and what they depend on
+          git clone --depth 1 --branch "$BRANCH" $ORG/OneData.git OneData || git clone --depth 1 $ORG/OneData.git OneData
+          git clone --depth 1 --branch "$BRANCH" $ORG/OneMenu.git OneMenu || git clone --depth 1 $ORG/OneMenu.git OneMenu
           python3 - <<'PY'
           import json, os, subprocess
-          seen = {"OneMachine", "HAPI", "OneBus", "OneChip"}
-          queue = ["OneBus", "OneChip"]
+          seen = {"OneMachine", "HAPI", "OneBus", "OneChip", "OneData", "OneMenu"}
+          queue = ["OneBus", "OneChip", "OneData", "OneMenu"]
           while queue:
               name = queue.pop(0)
               path = os.path.join(name, "library.json")
