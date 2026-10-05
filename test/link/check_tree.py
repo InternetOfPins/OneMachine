@@ -26,6 +26,8 @@ if HASHED:
     try: Tree(link); check(False, 'a device described by hash, and no description directory')
     except LinkError as e: check('-DONEMACHINE_DESC_TEXT' in str(e) and d[5:13].decode() in str(e), 'a readable error: %s' % e)
 m = Tree(link, descriptions=DESC)
+def key(name):                                           # a code in a raw request: its number under the hash, or its name (the text build)
+    return struct.pack('<IB', m.hash, m.codes[name].num) if HASHED else name.encode()
 if HASHED: check(m.description == open(os.path.join(DESC, d[5:13].decode() + '.txt')).read(), 'the text is the build output\'s')
 if not HASHED and DESC:                                  # the two walks: the text the device sends, without its statuses, is the build output's
     import re
@@ -68,15 +70,20 @@ for bad, exc in ((300, OutOfRange), (-1, OutOfRange)):
     try: m.air.ctrl_meas = bad; check(False, 'range %r' % bad)
     except exc: pass
 check(reg(0xF4) == 0x27, 'refused here: nothing was sent')
-st, _ = op('w', struct.pack('<i', 300) + b'air/ctrl_meas'); check(st == 3 and reg(0xF4) == 0x27, 'the device refuses it too (BadValue) and keeps the value')
+st, _ = op('w', struct.pack('<i', 300) + key('air/ctrl_meas')); check(st == 3 and reg(0xF4) == 0x27, 'the device refuses it too (BadValue) and keeps the value')
 try: m.temp = 1; check(False, 'temp is read-only')
 except ReadOnly: pass
 try: m.air = 1; check(False, 'air is a group')
 except AttributeError: pass
 try: m.nothing; check(False, 'unknown code')
 except UnknownCode: pass
-st, _ = op('w', struct.pack('<i', 1) + b'temp'); check(st == 0x82, 'a set of a read-only code: the device answers ReadOnly')
-st, _ = op('v', b'nope'); check(st == 0x80, 'an unknown code: Unknown')
+st, _ = op('w', struct.pack('<i', 1) + key('temp')); check(st == 0x82, 'a set of a read-only code: the device answers ReadOnly')
+st, _ = op('v', struct.pack('<IB', m.hash, 6) if HASHED else b'nope'); check(st == 0x80, 'an unknown code: Unknown')
+if HASHED:                                               # a number is valid only under the hash it was read with; names are not codes here
+    st, _ = op('v', struct.pack('<IB', m.hash ^ 1, 0)); check(st == 1, 'another build\'s hash: BadHash (%d)' % st)
+    st, _ = op('w', struct.pack('<i', 0x27) + struct.pack('<IB', m.hash ^ 1, 4)); check(st == 1 and reg(0xF4) == 0x27, 'a set under another hash: BadHash, nothing written')
+    st, _ = op('v', b'temp'); check(st == 2, 'a name, by hash: BadLength (%d)' % st)
+    st, d = op('v', key('temp')); check(st == 0 and len(d) == 5, 'temp by its number: status and value')
 
 # ---- a reset behind the host's back: the last setting comes back ---------------------------------------------------------------
 op('x'); check(reg(0xF4) == 0x00, 'the chip lost its settings')
@@ -116,7 +123,7 @@ op('z', bytes([2])); advance(20)
 ch = m.changes()
 check([x for x in ch if x.status] == [Change('card', status='gone')] and m.status('card') == 'gone' and m.status('air') == 'alive', 'the card\'s row gone: %r' % ch)
 op('z', bytes([0])); advance(20); m.changes()
-st, d = op('v', b'card'); check(st == 4 and d == bytes([0]), 'an event has no value: NoValue and the status alone')
+st, d = op('v', key('card')); check(st == 4 and d == bytes([0]), 'an event has no value: NoValue and the status alone')
 
 # ---- the card: an event with a value ------------------------------------------------------------------------------------------
 m.changes()

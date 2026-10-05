@@ -55,6 +55,13 @@
 
 // What the sketch says about itself goes to Log: the serial monitor. In the link build (env d1_mini_link, -DONEMACHINE_LINK) the serial port carries
 // the link's frames instead (role/link.h), and the log says nothing.
+// The link build by hash (d1_mini_link): its log goes nowhere, and the codes' names are in the build output only (describe.py), so the log lines that
+// carry names are left out of it, and the names with them. The text build (d1_mini_link_text) and the build without the link keep them.
+#if defined(ONEMACHINE_LINK) && !defined(ONEMACHINE_DESC_TEXT)
+  #define SPI_LOG_NAMES 0
+#else
+  #define SPI_LOG_NAMES 1
+#endif
 #ifdef ONEMACHINE_LINK
 struct NullPrint : Print { size_t write(uint8_t) override { return 1; } size_t write(const uint8_t*, size_t n) override { return n; } };
 static NullPrint nullPrint;
@@ -191,6 +198,7 @@ using AirTicker = fail::Ticks<AirApp, AirDrivers>;
 // call say<code, decimals>(value) when they change (the sync pass in loop()); air is the control group and ctrl_meas a register of it, silent.
 // Each reaches its node by a compile-time path into the machine (PathRef<Bmp, 3, 1> is node #3, child #1).
 template<typename Code, uint8_t Decimals> static void say(int32_t v) {
+#if SPI_LOG_NAMES
   Log.print(millis()); Log.print(' '); for (unsigned i = 0, c; (c = Code::name().rom(i)); ++i) Log.print(char(c)); Log.print('=');
   int32_t p = 1; for (uint8_t i = 0; i < Decimals; ++i) p *= 10;
   if (v < 0) Log.print('-');
@@ -199,6 +207,7 @@ template<typename Code, uint8_t Decimals> static void say(int32_t v) {
   const int32_t frac = a % p;
   for (int32_t q = p / 10; q > frac && q > 1; q /= 10) Log.print('0');
   Log.println(frac);
+#endif
 #ifdef ONEMACHINE_LINK
   bmpm::ChangeQueue<8>::note(Code::num, v);   // and for the consumer that reads changes over the link
 #endif
@@ -218,9 +227,11 @@ template<typename A> static void table(const __FlashStringHelper* bus) {
 
 // the machine and what is published of it, for a consumer: a row's address is its identity in the path
 static void describe() {
+#if SPI_LOG_NAMES
   if (AirApp::reg.count < 2) return;
   SerialPut put;
   bmpm::describe<Bmp, Published>(put, airBus);
+#endif
 }
 
 // the air sensor's row: a status change, and each time it came back (its captured state replayed, or the defaults because it was another part)

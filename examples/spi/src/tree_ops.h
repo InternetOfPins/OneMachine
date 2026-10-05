@@ -5,10 +5,11 @@
 //        (bmpm::HashWalk, Extra::describeStatic); the consumer has the text from the build (examples/spi/describe.cpp writes <hash>.txt; python: Tree(link, descriptions=dir)).
 //        With -DONEMACHINE_DESC_TEXT: the text itself, bmpm::describe's walk then the codes that only notify (Extra), each line ending with the
 //        status of its row. Codes are numbered in the order they are listed.
-//   'v'  get by code           payload: the code (text)                       reply: the status (u8), then the value (i32 little-endian)
+//   'v'  get by code           payload: the code: u32 the description's hash and u8 the code's number (by hash, the default; BadHash when the hash
+//                              is not this build's), or its name (text, -DONEMACHINE_DESC_TEXT)                       reply: the status (u8), then the value (i32 little-endian)
 //        The status is the device's: Alive 0, Stale 1, Gone 2. A part that is not Alive has no live value: a register answers the last value set (its
 //        capture, the intent that comes back), a sensor value the last one measured. A group or an event has no value: the status alone, with NoValue.
-//   'w'  set by code           payload: the value (i32), then the code        reply: nothing; the set goes through the node: its limits, its capture,
+//   'w'  set by code           payload: the value (i32), then the code (as for 'v')        reply: nothing; the set goes through the node: its limits, its capture,
 //                                                                              its register (a part that is gone keeps it as the last intent)
 //   'n'  changes since         payload: none                                  reply: u8 how many were refused since the last 'n', then per change
 //                                                                              the code's number (u8) and its value (i32); a number with bit 7 set
@@ -106,6 +107,19 @@ namespace bmpm {
       return p >= 0 ? p : findExtra(static_cast<typename Extra::Codes*>(nullptr), s, n);
     }
 
+    // ---- a code in a request ------------------------------------------------------------------------------------------------
+#ifndef ONEMACHINE_DESC_TEXT
+    // by its number, under the description's hash: u32 the hash (little-endian), u8 the number. A number is valid only under the hash it was read
+    // with: a consumer holding another build's description is refused (BadHash). The names are in the build output only, not in the image.
+    static int code(const uint8_t* s, uint16_t n, uint8_t& err) {
+      constexpr uint32_t mine = hash();
+      if (n != 5) { err = role::LinkBadLength; return -1; }
+      if ((uint32_t(s[0]) | uint32_t(s[1]) << 8 | uint32_t(s[2]) << 16 | uint32_t(s[3]) << 24) != mine) { err = role::LinkBadHash; return -1; }
+      if (s[4] >= numCodes) { err = role::LinkUnknown; return -1; }
+      return s[4];
+    }
+#endif
+
     // ---- status: the row a code is bound to ---------------------------------------------------------------------------
     template<typename Pub> static uint8_t statusOne() {
       using S = typename SrcOf<Pub>::type;
@@ -174,8 +188,14 @@ namespace bmpm {
       static Pubs* const list = nullptr;
       switch (op) {
         case 'v': {
-          const int at = find(in, n);
+#ifdef ONEMACHINE_DESC_TEXT
+          const int at = find(in, n);                      // by its name: the text build, whose consumer has the names from 'd'
           if (at < 0) { r.status(role::LinkUnknown); return; }
+#else
+          uint8_t err = role::LinkUnknown;
+          const int at = code(in, n, err);
+          if (at < 0) { r.status(err); return; }
+#endif
           const uint8_t st = status(at);
           int32_t v = 0;
           const uint8_t ls = at < numPubs ? get(list, at, v, st) : role::LinkNoValue;
@@ -185,8 +205,14 @@ namespace bmpm {
         case 'w': {
           if (n < 5) { r.status(role::LinkBadLength); return; }
           const int32_t v = int32_t(uint32_t(in[0]) | uint32_t(in[1]) << 8 | uint32_t(in[2]) << 16 | uint32_t(in[3]) << 24);
+#ifdef ONEMACHINE_DESC_TEXT
           const int at = find(in + 4, uint16_t(n - 4));
           if (at < 0) { r.status(role::LinkUnknown); return; }
+#else
+          uint8_t err = role::LinkUnknown;
+          const int at = code(in + 4, uint16_t(n - 4), err);
+          if (at < 0) { r.status(err); return; }
+#endif
           r.status(at < numPubs ? set(list, at, v) : role::LinkReadOnly);
           return;
         }

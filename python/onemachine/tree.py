@@ -23,7 +23,7 @@ import os, struct
 from collections import namedtuple
 from .machine import LinkError
 
-OK, BAD_LENGTH, BAD_VALUE, NO_VALUE, UNKNOWN, TOO_LONG, READ_ONLY = 0, 2, 3, 4, 0x80, 0x81, 0x82
+OK, BAD_HASH, BAD_LENGTH, BAD_VALUE, NO_VALUE, UNKNOWN, TOO_LONG, READ_ONLY = 0, 1, 2, 3, 4, 0x80, 0x81, 0x82
 
 class OutOfRange(ValueError): pass
 class ReadOnly(AttributeError): pass
@@ -101,7 +101,7 @@ class Tree:
         st, data = self._call('d')
         if st != OK: raise LinkError('description: status %d' % st)
         text = data.decode()
-        statuses = None
+        statuses, h = None, None
         if text.startswith('hash '):                                          # the description by its hash: the text is in the build output
             head, digits = text.split('\n')[:2]
             h = int(head[5:], 16)
@@ -111,6 +111,7 @@ class Tree:
         if statuses is not None:
             if len(statuses) != len(codes): raise LinkError('description %08x: %d codes, the device has %d' % (h, len(codes), len(statuses)))
             for c, st in zip(codes, statuses): c.status = st
+        object.__setattr__(self, 'hash', h)                                 # the description's hash: codes go by number under it (None: by name)
         object.__setattr__(self, 'description', text)
         object.__setattr__(self, '_codes', codes)
         object.__setattr__(self, 'codes', {c.name: c for c in codes})
@@ -127,10 +128,15 @@ class Tree:
                 return text
         raise LinkError('the device describes itself by hash %08x: no %s in %s (give Tree(link, descriptions=<the build\'s description dir>), or build the device with -DONEMACHINE_DESC_TEXT)' % (h, name, self.descriptions or 'no directory'))
 
+    def _key(self, c):
+        """A code in a request: u32 the description's hash and u8 its number (a device described by hash), or its name."""
+        return struct.pack('<IB', self.hash, c.num) if self.hash is not None else c.name.encode()
+
     def _read(self, code):
         """(status, raw) from the device: raw is None for a group or an event. The status is the part's; a part that is not alive answers its last value."""
         c = self._known(code)
-        st, data = self._call('v', c.name.encode())
+        st, data = self._call('v', self._key(c))
+        if st == BAD_HASH: raise LinkError('get %s: the device is another build (its description changed): refresh()' % code)
         if st not in (OK, NO_VALUE) or len(data) < 1: raise LinkError('get %s: status %d' % (code, st))
         status = STATUS[data[0]] if data[0] < len(STATUS) else 'gone'
         self._status[c.src] = status
@@ -169,9 +175,10 @@ class Tree:
         raw = c.to_raw(value)
         if (c.lo is not None and raw < c.lo) or (c.hi is not None and raw > c.hi):
             raise OutOfRange('%s: %r is outside %d..%d' % (code, value, c.lo, c.hi))
-        st, _ = self._call('w', struct.pack('<i', raw) + c.name.encode())
+        st, _ = self._call('w', struct.pack('<i', raw) + self._key(c))
         if st == BAD_VALUE: raise OutOfRange('%s: the device refused %r' % (code, value))
         if st == READ_ONLY: raise ReadOnly('%s is read-only on the device' % code)
+        if st == BAD_HASH: raise LinkError('set %s: the device is another build (its description changed): refresh()' % code)
         if st != OK: raise LinkError('set %s: status %d' % (code, st))
 
     def changes(self):
@@ -209,7 +216,7 @@ class Tree:
         raise UnknownCode('no code %r (the device has %s)' % (name, ', '.join(self.codes)))
 
     def __getattr__(self, name):                       # m.temp, m.air
-        if name.startswith('_') or name in ('codes', 'description', 'descriptions', 'link', 'missed'): raise AttributeError(name)
+        if name.startswith('_') or name in ('codes', 'description', 'descriptions', 'hash', 'link', 'missed'): raise AttributeError(name)
         return self._access(name)
     def __setattr__(self, name, value):
         if name.startswith('_') or name in ('link', 'missed', 'descriptions'): object.__setattr__(self, name, value)
