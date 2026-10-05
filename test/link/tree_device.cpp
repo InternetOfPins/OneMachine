@@ -51,7 +51,7 @@ struct CodeCtrlMeas  { static constexpr uint8_t num = 4; ONEMACHINE_STATE_NAME(n
 struct CodeCard      { static constexpr uint8_t num = 5; ONEMACHINE_STATE_NAME(name, "card"); };
 
 using Queue = bmpm::ChangeQueue<8>;
-template<typename Code> static void note(int32_t v) { Queue::note(Code::num, v); }
+template<typename Code> static void note(int32_t) { bmpm::StateChanges<>::mark(Code::num); }   // a state code: a pending bit
 
 using PubTemp     = bmpm::PublishedAt<CodeTemp,     bmpm::PathRef<M, 0>,    oneData::OnSync<&note<CodeTemp>>>;
 using PubPress    = bmpm::PublishedAt<CodePress,    bmpm::PathRef<M, 1>,    oneData::OnSync<&note<CodePress>>>;

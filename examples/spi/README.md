@@ -73,10 +73,12 @@ m.changes()                                            # [Change('temp', 27.61, 
 m.status('air')                                        # 'alive', 'stale' or 'gone': the part's row; m.temp raises Stale when it is not alive
 ```
 
-Ops: `d` the description (each code with the status of its row), `v` get by code (the status first, then the value; a part that is not alive answers its last value), `w` set by code (through the node: its limits, its capture, its register), `n` the changes since the last `n` (a value, or a status change of a row), `f` one
-fault key (`x` resets the air sensor behind the host's back, `v` and `p` reset the RFID reader). The changes wait in a `fail::Buffer` of 8: when a consumer
-does not read for a while the newest are refused and counted, and the reply of `n` says how many it missed (`m.missed`); read the values again with
-`m.temp`. `examples/spi/rig_session.py` is a session on the real board; `test/link/build.sh` runs the same consumer against a simulated one.
+Ops: `d` the description (each code with the status of its row), `v` get by code (the status first, then the value; a part that is not alive answers its last value), `w` set by code (through the node: its limits, its capture, its register), `n` the changes since the sequence number of the last reply (state codes once each with their value now, a row's status, and the events), `f` one
+fault key (`x` resets the air sensor behind the host's back, `v` and `p` reset the RFID reader). State and events are kept apart: a state code
+(temp, press, a register, a row's status) is one pending bit, so a consumer that does not read for a while gets each code once with its latest value
+and nothing is lost; the card is an event and waits in a `fail::Buffer` of 8: when it is full the newest are refused and counted (`m.missed`). A reply
+that is lost is seen by its sequence number, and the next one carries every code (`m.resyncs`).
+`examples/spi/rig_session.py` is a session on the real board; `test/link/build.sh` runs the same consumer against a simulated one.
 
 ## Build and flash
 

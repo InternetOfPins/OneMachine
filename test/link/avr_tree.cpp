@@ -58,8 +58,11 @@ struct CodeCard     { static constexpr uint8_t num = 5; ONEMACHINE_STATE_NAME(na
 volatile int32_t g_sink;
 volatile uint32_t g_card;   // a card's UID, written by whatever reads the reader (an RC522 is not part of this image)
 #ifdef LINK
-using Queue = bmpm::ChangeQueue<8>;
-template<typename Code> static void note(int32_t v) { Queue::note(Code::num, v); }
+#ifndef EVENTS
+  #define EVENTS 8   // the event queue's depth (the card)
+#endif
+using Queue = bmpm::ChangeQueue<EVENTS>;
+template<typename Code> static void note(int32_t) { bmpm::StateChanges<>::mark(Code::num); }   // a state code: a pending bit
 #else
 template<typename Code> static void note(int32_t v) { g_sink = v; }
 #endif
@@ -77,7 +80,7 @@ struct Extra {
   static uint8_t status(uint8_t) { return 0; }
   template<typename P> static void describe(P& put) { const char* s = "  card -> 0/1 notify event ro value u32 status alive\n"; while (*s) put(*s++); }
 };
-using Ops = bmpm::TreeOps<M, Pubs, Extra, 1, 8>;
+using Ops = bmpm::TreeOps<M, Pubs, Extra, 1, EVENTS>;
 struct UartOut { static void put(uint8_t b) { Uart::putch(b); } };
 struct LinkApp {
   static constexpr bool payload = true;

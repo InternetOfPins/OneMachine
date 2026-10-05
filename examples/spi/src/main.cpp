@@ -205,7 +205,7 @@ template<typename Code, uint8_t Decimals> static void say(int32_t v) {
   for (int32_t q = p / 10; q > frac && q > 1; q /= 10) Log.print('0');
   Log.println(frac);
 #ifdef ONEMACHINE_LINK
-  bmpm::ChangeQueue<8>::note(Code::num, v);   // and for the consumer that reads changes over the link
+  bmpm::StateChanges<>::mark(Code::num);   // and for the consumer that reads changes over the link: a pending bit, the value is read when it asks
 #endif
 }
 using PubTemp  = bmpm::PublishedAt<CodeTemp,  bmpm::PathRef<Bmp, 0>, oneData::OnSync<&say<CodeTemp, 2>>>;
