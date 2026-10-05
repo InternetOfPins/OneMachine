@@ -27,7 +27,7 @@ namespace discover {
   // stage 2: the pointer byte Reg is written, then one byte read must equal Val
   template<uint8_t Reg, uint8_t Val, uint8_t Lo, uint8_t Hi = Lo, typename Where = Anywhere>
   struct IdProbe {
-    static constexpr uint8_t lo = Lo, hi = Hi;
+    static constexpr uint8_t lo = Lo, hi = Hi, reg = Reg, val = Val;   // reg, val: the chip id the probe accepts, and where it is read
     using Wh = Where;
     static constexpr bool presence = true, readOnly = false, certain = false, writes = true;
     template<typename W, typename D> static bool test(uint8_t addr, RowId) {
@@ -41,7 +41,7 @@ namespace discover {
   // stage 1 as a read-probe and one read: nothing is ever written to the device
   template<uint8_t Lo, uint8_t Hi, uint8_t Val, typename Where = Anywhere>
   struct ReadProbe {
-    static constexpr uint8_t lo = Lo, hi = Hi;
+    static constexpr uint8_t lo = Lo, hi = Hi, val = Val;
     using Wh = Where;
     static constexpr bool presence = true, readOnly = true, certain = false, writes = false;
     template<typename W, typename D> static bool test(uint8_t addr, RowId) {
@@ -63,6 +63,25 @@ namespace discover {
   // Use<Own, D>: entries.h's generic Norm wraps a bare driver in LegacyProbe; Own asks for D's own idReg checked
   // in two stages instead -- the one place the generic entry shape reaches into a real probe.
   template<typename D> struct Norm<Use<Own, D>, 1> { using Type = Use<IdProbe<IdRegOf<D>::value, D::id, D::addrLo, D::addrHi>, D>; };
+
+  // Every chip id the entries of W declare for D: D's own id, and the id of each IdProbe entry that names D at its idReg (a driver that
+  // serves a family lists one entry per id: a BMP280 at 0x58 and a BME280 at 0x60 are the same driver). What a failure edge's reprobe accepts.
+  template<typename P, typename = void> struct HasProbeId : std::false_type {};
+  template<typename P> struct HasProbeId<P, std::void_t<decltype(P::reg), decltype(P::val)>> : std::true_type {};
+  template<typename W, typename D> struct DeclaredIds {
+    template<typename L> struct In;
+    template<typename... E> struct In<hapi::Chain<E...>> {
+      static bool has([[maybe_unused]] uint8_t got) { return (matches<E>(got) || ... || false); }
+    private:
+      template<typename X> static bool matches([[maybe_unused]] uint8_t got) {
+        using N = typename Norm<X>::Type;
+        if constexpr (KindOf<N>::value == 1 && std::is_same<typename N::Driver, D>::value && HasProbeId<typename N::Probe>::value)
+          return N::Probe::reg == IdRegOf<D>::value && N::Probe::val == got;
+        else return false;
+      }
+    };
+    static bool has(uint8_t got) { return got == D::id || In<typename W::Entries>::has(got); }
+  };
 
   // ---- the fold: one pass over the address, entries in list order ---------------------------------------
   struct Seen { int8_t known[2] = {-1, -1}; };   // stage-1 answer per probe kind, for one address in one pass

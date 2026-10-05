@@ -111,6 +111,7 @@ namespace discover {
     // DeviceState: one slot per row, the largest declared by the drivers of the list; nothing when none declares one.
     // Named through a nested template so that an app whose drivers declare none never instantiates it.
     // `Drivers` is a list of entries (identify.h); a plain list of drivers is one. DriverList: the distinct drivers they name.
+    using Entries    = Drivers;   // the entries as given: what the drivers' ids are read from (identify.h, DeclaredIds)
     using DriverList = DriversIn<Drivers>;
 
     template<typename D = DriverList> struct Dev {

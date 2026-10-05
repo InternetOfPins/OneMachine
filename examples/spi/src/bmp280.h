@@ -57,6 +57,8 @@ namespace bmp {
       writeReg(row, 0xF4, 0x57);   // temperature x2, pressure x16, normal mode
     }
 
+    static constexpr int64_t mul(int64_t v, unsigned n) { return v * (int64_t(1) << n); }
+
     static void read(RowId row) {
       uint8_t b[6] = {};
       B::readRegs(B::addrOf(row), 0xF7, b, 6);
@@ -71,18 +73,19 @@ namespace bmp {
       const int32_t tFine = v1 + v2;
       B::template emit<Temp>(row, (tFine * 5 + 128) >> 8);   // 0.01 C
 
+      // the datasheet's shifts are multiplications here: left-shifting a negative value is undefined before C++20 (the same results)
       int64_t p1 = int64_t(tFine) - 128000;
       int64_t p2 = p1 * p1 * int64_t(d.P6);
-      p2 = p2 + ((p1 * int64_t(d.P5)) << 17);
-      p2 = p2 + (int64_t(d.P4) << 35);
-      p1 = ((p1 * p1 * int64_t(d.P3)) >> 8) + ((p1 * int64_t(d.P2)) << 12);
-      p1 = (((int64_t(1) << 47) + p1) * int64_t(d.P1)) >> 33;
+      p2 = p2 + mul(p1 * int64_t(d.P5), 17);
+      p2 = p2 + mul(int64_t(d.P4), 35);
+      p1 = ((p1 * p1 * int64_t(d.P3)) >> 8) + mul(p1 * int64_t(d.P2), 12);
+      p1 = (mul(1, 47) + p1) * int64_t(d.P1) >> 33;
       if (p1 == 0 || adcP == 0x80000) return;   // no calibration, or no pressure conversion yet
       int64_t p = 1048576 - adcP;
-      p = (((p << 31) - p2) * 3125) / p1;
+      p = ((mul(p, 31) - p2) * 3125) / p1;
       p1 = (int64_t(d.P9) * (p >> 13) * (p >> 13)) >> 25;
       p2 = (int64_t(d.P8) * p) >> 19;
-      p = ((p + p1 + p2) >> 8) + (int64_t(d.P7) << 4);
+      p = ((p + p1 + p2) >> 8) + mul(int64_t(d.P7), 4);
       B::template emit<Press>(row, int32_t(p >> 8));   // Pa (Q24.8 >> 8)
     }
   };
