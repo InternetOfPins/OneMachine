@@ -37,6 +37,47 @@ interrupt part is optional as a whole: a mode without `using Irq` is the polling
 command runs. Keep the IRQ off the boot strapping pins (D3, D4, D8, rejected at compile time): the RC522 keeps its state across a
 reset of the board, and a pending request would hold such a pin low at the next boot.
 
+## The air sensor as a machine
+
+The BMP280/BME280 is a static machine of OneMenu `ItemDef` nodes (`src/bmp280_machine.h`), and takes its Criteria: `Machine<W, Addr<0x76>>`
+(a second sensor at 0x77 is a second type with its own data). Nodes: `#0 temp` and `#1 press` (read-only values that move when the sensor is
+read), `#2 cal` (the device's calibration constants: read when it is found, never state) and `#3 ctrl`, a group of register mimics whose `get()`
+reads the chip and `set()` writes it; their defaults are the init.
+
+The App publishes nodes under its own codes with `PublishedAt<Code, PathRef<Machine, 3, 1>, OnSync<fn>>`: an outer node that reaches the inner one
+by a compile-time path (node #3, child #1; any node, a leaf of a group too) without copying it. A sync pass calls `fn(value)` for each published
+value that changed, so `temp=` and `press=` appear only when they move. Key `d` prints the description: the machine's nodes, then the published
+codes with their path (`<bus>/<address>/<node>[/<child>]`), fields and whether they notify.
+
+Each register keeps the last value set (`Capture`), also while the sensor is gone. The sensor is under failure handling: each poll reads the control
+registers back, and a register that no longer holds what was set means the part was reset behind the host's back. When the sensor is back, after
+that or after it was unplugged, it is validated (the same chip id and calibration as the part that was here): validated, the last settings are
+written again; another part, the settings are dropped and the defaults are the init. The log shows `STATUS <ms> air <from>-><to>`, then
+`air restored #n` or `air defaults #n`.
+
+Keys: `a` reads the control group by path, `o` sets `ctrl_meas` to oversampling x1, `q` to 0x2B (also while the sensor is unplugged), `r` writes the
+registers' defaults, `x` resets the sensor behind the host's back.
+
+## A Python consumer over the serial port
+
+`pio run -e d1_mini_link -t upload` builds the same sketch with the serial port carrying the link (`role/link.h`, with payload ops) instead of the log. `python/onemachine` reads it, with the package's own `StreamLink`:
+
+```python
+import serial
+from onemachine import Tree, StreamLink
+ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=2)
+m = Tree(StreamLink(ser.read, ser.write, ser.flush))   # reads the description
+m.temp, m.press                                        # 27.62, 1026.68: scaled as the description says (0.01 C, 0.01 hPa)
+m.air.ctrl_meas = 0x27                                 # set by code; read-only and out-of-range are refused here, before anything is sent
+m.changes()                                            # [Change('temp', 27.61, 2761), Change('card', 4062320374, ...), Change('air', status='stale')]
+m.status('air')                                        # 'alive', 'stale' or 'gone': the part's row; m.temp raises Stale when it is not alive
+```
+
+Ops: `d` the description (each code with the status of its row), `v` get by code (the status first, then the value; a part that is not alive answers its last value), `w` set by code (through the node: its limits, its capture, its register), `n` the changes since the last `n` (a value, or a status change of a row), `f` one
+fault key (`x` resets the air sensor behind the host's back, `v` and `p` reset the RFID reader). The changes wait in a `fail::Buffer` of 8: when a consumer
+does not read for a while the newest are refused and counted, and the reply of `n` says how many it missed (`m.missed`); read the values again with
+`m.temp`. `examples/spi/rig_session.py` is a session on the real board; `test/link/build.sh` runs the same consumer against a simulated one.
+
 ## Build and flash
 
 ```

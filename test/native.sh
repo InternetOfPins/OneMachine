@@ -24,7 +24,6 @@ PROGRAMS=(
   discover/spi_irq
   discover/spi_irq:-DFALLBACK
   discover/spi_irq:-DNOCHECK
-  discover/bmp280_comp
   fail/unit_f1
   fail/unit_f2
   fail/unit_f3

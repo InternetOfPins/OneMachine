@@ -2,6 +2,9 @@
 # SPI discovery round 1 verification.
 #   native : g++ -O2 (+ASan/UBSan, + clang if present) -- the identification, empty-slot and RC522 card assertions.
 #   rules  : each compile-time rule rejects its case with its own message.
+#   bmp    : the BMP280 as a machine of ItemDef nodes (bmp_machine.cpp, against a simulated chip with the datasheet's worked example), and its
+#            capture and restore under a failure edge: reset behind the host's back, unplugged, replaced (bmp_capture.cpp).
+#   link   : the Python consumer of the machine tree (python/onemachine/tree.py) against the air sensor on a simulated chip (test/link/build.sh).
 #   irq    : the RC522's interrupt part (spi_irq.cpp) and the ESP8266 delivery components' pin rules (irq_delivery.cpp).
 #   AVR    : avr-g++ -Os atmega328p, linked over the real AVR SPI core -- it builds, and its size.
 # Exits non-zero if an assertion fails, a rule does not fire, or the AVR image does not build.
@@ -59,6 +62,21 @@ for cfg in "" "-DFALLBACK" "-DNOCHECK"; do
   fi
 done
 
+echo; echo "=== BMP280 as a machine of ItemDef nodes (bmp_machine.cpp): g++ -O1, then ASan/UBSan, then clang++ ==="
+MINC="$INC -I ../../../OneData/include -I ../../../OneMenu/include -I ../../../OneItem/include -I ../../../OneOutput/include -I ../../../OneBit/include -I ../../../OnePin/include -I ../../../OneChip/include -I ../../../OneParse/include -I ../../../OneInput/include -I ../../../OneIO/include"
+g++ -std=c++17 -O1 -Wall $MINC bmp_machine.cpp -o "$OUT/bm" && { "$OUT/bm" || rc=1; }
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all $MINC bmp_machine.cpp -o "$OUT/bmsan" && { run "$OUT/bmsan"; }
+if command -v clang++ >/dev/null; then
+  clang++ -std=c++17 -O1 $MINC bmp_machine.cpp -o "$OUT/bmclang" && { run "$OUT/bmclang"; }
+fi
+
+echo; echo "=== BMP280 machine, capture and restore under a failure edge (bmp_capture.cpp): g++ -O1, ASan/UBSan, clang++ ==="
+g++ -std=c++17 -O1 -Wall $MINC bmp_capture.cpp -o "$OUT/bc" && { "$OUT/bc" || rc=1; }
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all $MINC bmp_capture.cpp -o "$OUT/bcsan" && { run "$OUT/bcsan"; }
+if command -v clang++ >/dev/null; then
+  clang++ -std=c++17 -O1 $MINC bmp_capture.cpp -o "$OUT/bcclang" && { run "$OUT/bcclang"; }
+fi
+
 echo; echo "=== ESP8266 interrupt delivery (irq_delivery.cpp, host stub): the pins that compile, the ones rejected ==="
 DINC="$INC -I ../support/arduino_stub"
 g++ -std=c++17 -Wall -Wextra -Werror $DINC irq_delivery.cpp -o "$OUT/idl" && "$OUT/idl" && echo "OK: Sampled<16> and IsrFlag<5> build" || { echo "FAIL: the delivery components do not build"; rc=1; }
@@ -79,6 +97,9 @@ for pair in "NEG_ID_IDLE:an SPI id of 0x00 or 0xFF is what an empty slot reads" 
   if g++ -std=c++17 -D$def $INC -fsyntax-only spi1.cpp 2>&1 | grep -qF "$msg"; then echo "OK: -D$def rejected: $msg"
   else echo "FAIL: -D$def was not rejected with '$msg'"; rc=1; fi
 done
+
+echo; echo "=== the Python consumer of the machine tree (test/link): over a pipe and in-process (ctypes) ==="
+if command -v python3 >/dev/null; then bash ../link/build.sh 2>&1 | grep -E "^OK|^FAIL|Error|Traceback" || rc=1; else echo "(python3 not found: skipped)"; fi
 
 if command -v avr-g++ >/dev/null; then
   echo; echo "=== avr-g++ $(avr-g++ -dumpversion) -Os atmega328p (linked, real SPI core) ==="
