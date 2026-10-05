@@ -27,6 +27,7 @@ PROGRAMS=(
   fail/roundF1
   fail/roundF5:-DF5_COUNT\ -DF5_TAP
   fail/roundF7
+  fail/twi_reprobe_ids
   rosCompose/round1
   state/check_net
   state/check_wire

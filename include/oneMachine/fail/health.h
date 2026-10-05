@@ -165,22 +165,23 @@ namespace fail {
         HealthRow& h = rows[r];
         h.flapEwma = ewma(h.flapEwma, 0);                                  // decay: pulled toward 0 when nothing flapped this period
         if (h.flapEwma < Cfg::exitQ && !h.quarantined) { if (h.quietPeriods != 0xFF) ++h.quietPeriods; }   // a row that is not polled is quiet by construction: that does not cool it
+        bool moved = false;                                                // the row failed or retried during the period that just ended
         if (!W::reg.rows[r].isBus) {
           const FailStatus fs = FailStatusFold<Drivers>::template of<W>(r);
-          const bool moved = fs.fails != h.lastFails || fs.retries != h.lastRetries;
+          moved = fs.fails != h.lastFails || fs.retries != h.lastRetries;
           h.lastFails = fs.fails; h.lastRetries = fs.retries;
           const uint16_t raw = moved ? uint16_t(costWeight(fs.lastKind)) * 8u : 0;
           h.costEwma = ewma(h.costEwma, raw > 255 ? uint16_t(255) : raw);
         }
         h.probeWindowOpen = h.quarantined && h.probation && (period % Cfg::probeN == 0);
-        policy(r, h, now);
+        policy(r, h, now, moved);
       }
     }
 
   private:
     static uint16_t ewma(uint16_t avg, uint16_t sample) { return uint16_t(int32_t(avg) + ((int32_t(sample) - int32_t(avg)) >> 3)); }
 
-    static void policy(RowId r, HealthRow& h, uint32_t now) {
+    static void policy(RowId r, HealthRow& h, uint32_t now, bool moved) {
       const bool required = W::reg.rows[r].isBus ? RequiredBusFold<W>::of(r) : RequiredFold<Drivers>::template of<W>(r);
       if (W::reg.rows[r].isBus) {                                          // report-only for a bus row: nothing to disconnect it from
         if (required && (h.flapEwma >= Cfg::enterQ)) escalate(r, h, EscalateReason::Flap);
@@ -195,7 +196,9 @@ namespace fail {
         if (h.probeWindowOpen) { h.probing = true; return; }               // a probe window: the row is polled and ticked this period; what it did is judged at the next tick
         if (!h.probing) return;                                            // between probe windows: nothing new to decide
         h.probing = false;                                                 // the window has closed: judge the probe, not the averages that decayed while the row was left alone
-        if (W::reg.status(r) == discover::Status::Alive && h.flapEwma < Cfg::exitQ && h.costEwma < Cfg::exitD)
+        // `moved` covers exactly the window's period: a probe that failed or retried has failed, even if the row stayed Alive (one bad
+        // period lifts a cost that decayed to 0 only to 31, under exitD, so the averages alone would let it out)
+        if (!moved && W::reg.status(r) == discover::Status::Alive && h.flapEwma < Cfg::exitQ && h.costEwma < Cfg::exitD)
         { h.quarantined = false; h.probation = false; h.probeWindowOpen = false; h.disconnected = false; return; }
         h.fib.up(Cfg::fibCap); h.probation = false; h.until = now + h.fib.cur * Cfg::quarantineUnitMs;   // still bad on a probe: a fresh, longer hard block
         return;

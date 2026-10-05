@@ -13,6 +13,7 @@
 #include "layers.h"
 #include "cause.h"
 #include "slots.h"
+#include <oneMachine/discover/identify.h>
 
 namespace fail {
 
@@ -53,7 +54,7 @@ namespace fail {
       uint8_t got = 0;
       const Outcome o = checkedRead(row, discover::IdRegOf<Impl>::value, &got, 1);
       if (!o.isOk()) return o;
-      return got == Impl::id ? Outcome::Ok() : Outcome::Fail(Kind::Absent, got);       // somebody else answers there
+      return discover::DeclaredIds<W, Impl>::has(got) ? Outcome::Ok() : Outcome::Fail(Kind::Absent, got);       // somebody else answers there
     }
   };
 
