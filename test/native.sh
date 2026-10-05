@@ -22,12 +22,16 @@ PROGRAMS=(
   discover/spi1
   discover/spi_fail
   discover/spi_health
+  discover/spi_irq
+  discover/spi_irq:-DFALLBACK
+  discover/spi_irq:-DNOCHECK
   fail/unit_f1
   fail/unit_f2
   fail/unit_f3
   fail/roundF1
   fail/roundF5:-DF5_COUNT\ -DF5_TAP
   fail/roundF7
+  fail/services
   fail/twi_reprobe_ids
   rosCompose/round1
   state/check_net
@@ -37,6 +41,7 @@ PROGRAMS=(
   state/example
   role/role_check
   role/call_check
+  role/payload_check
 )
 
 run() {  # label dir name extra-flags compile-flags...

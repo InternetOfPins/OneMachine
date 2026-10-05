@@ -7,6 +7,7 @@
 # Mosquitto) stay in R&D: they need OneBus/mqtt, which is not part of this library.
 set -e
 cd "$(dirname "$0")"
+. ../tools/lastok.sh
 INC="-I ../../include -I ../../../HAPI/include -I ../../../OneBus/include"
 INCABS="-I $(cd ../../include && pwd) -I $(cd ../../../HAPI/include && pwd) -I $(cd ../../../OneBus/include && pwd)"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
@@ -19,10 +20,10 @@ R2_COMMIT=94d9be8   # re-baselined at the C1 registry/identify split (2026-09-28
 echo "=== F3.1 unit level: the classes, the report on _deliver(), isolation (mock time) ==="
 g++ -std=c++17 -O2 -Wall -Wextra $INC unit_f3.cpp -o "$OUT/u3" 2> "$OUT/u3.txt" || { bad "unit_f3 does not compile"; cat "$OUT/u3.txt"; }
 "$OUT/u3" | tail -3
-"$OUT/u3" | tail -1 | grep -q '^OK' && [ "$(grep -c warning "$OUT/u3.txt" || true)" = 0 ] && ok "g++ -O2, 0 warnings: display (latest wins, the replaced counted and reported once), storage (N records in order, the newest refused when full, a pulled card retried on a back-off and remounted, nothing lost), fire-and-forget (never retried), direct (status only), no layer at all (nothing kept), no sink time inside offer()" || bad "unit_f3"
-g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all $INC unit_f3.cpp -o "$OUT/u3s" && "$OUT/u3s" | tail -1 | grep -q '^OK' && ok "ASan+UBSan" || bad "unit_f3 under sanitizers"
+lastok "$OUT/u3" && [ "$(grep -c warning "$OUT/u3.txt" || true)" = 0 ] && ok "g++ -O2, 0 warnings: display (latest wins, the replaced counted and reported once), storage (N records in order, the newest refused when full, a pulled card retried on a back-off and remounted, nothing lost), fire-and-forget (never retried), direct (status only), no layer at all (nothing kept), no sink time inside offer()" || bad "unit_f3"
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all $INC unit_f3.cpp -o "$OUT/u3s" && lastok "$OUT/u3s" && ok "ASan+UBSan" || bad "unit_f3 under sanitizers"
 if command -v clang++ >/dev/null; then
-  clang++ -std=c++17 -O2 -Wall -Wextra $INC unit_f3.cpp -o "$OUT/u3c" && "$OUT/u3c" | tail -1 | grep -q '^OK' && ok "clang++ -O2" || bad "unit_f3 under clang"
+  clang++ -std=c++17 -O2 -Wall -Wextra $INC unit_f3.cpp -o "$OUT/u3c" && lastok "$OUT/u3c" && ok "clang++ -O2" || bad "unit_f3 under clang"
 fi
 
 echo; echo "=== F3.2 compile-fail: each class rejects what it does not accept, with its own message ==="

@@ -19,6 +19,11 @@
 // node before its constructor has run, and the constructor then wipes what was written (what the registers want, the Watch copies). Discover from
 // setup() or main().
 // describe() walks the machine and the published nodes and writes what a consumer needs: the codes, their path, their fields, which notify.
+//
+// What is specific to this device and what is not: Machine<W, Criteria, Mode> (the nodes, the registers' defaults, the identity hash, the driver) is the
+// BMP280's. PathRef, Published/PublishedAt, the register mimic (Reg), Reconcile, Limits, the description walk and the status of a machine's row
+// are written against a machine and not this one; they stay here until a second device is described the same way (the RC522, as a machine), which will
+// show which of them are the framework's and which are this machine's. tree_ops.h, the link's ops over the published nodes, is in the same position.
 #pragma once
 #include <stdint.h>
 #include <hapi/hapi.h>
