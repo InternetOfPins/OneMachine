@@ -3,6 +3,7 @@
 # (Reply, Within, Overall, Backoff, Coalesce). Unit level and inside discoverCompose's world; native and AVR.
 set -e
 cd "$(dirname "$0")"
+. ../tools/lastok.sh
 INC="-I ../../include -I ../../../HAPI/include -I ../../../OneBus/include"
 INCABS="-I $(cd ../../include && pwd) -I $(cd ../../../HAPI/include && pwd) -I $(cd ../../../OneBus/include && pwd)"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
@@ -14,11 +15,11 @@ F5B_COMMIT=94d9be8   # re-baselined at the C1 registry/identify split (2026-09-2
 
 echo "=== F2.1 unit level: return path, async, correlation, R-5, coalescing, back-off (mock time) ==="
 g++ -std=c++17 -O2 -Wall -Wextra -I ../../include -I ../../../HAPI/include unit_f2.cpp -o "$OUT/u2" 2> "$OUT/u2.txt" || { bad "unit_f2 does not compile"; cat "$OUT/u2.txt"; }
-[ "$(grep -c warning "$OUT/u2.txt" || true)" = 0 ] && "$OUT/u2" | tail -1 | grep -q '^OK' && ok "g++ $(g++ -dumpversion) -O2, 0 warnings" || { bad "unit_f2"; "$OUT/u2" | tail -3; }
+[ "$(grep -c warning "$OUT/u2.txt" || true)" = 0 ] && lastok "$OUT/u2" && ok "g++ $(g++ -dumpversion) -O2, 0 warnings" || { bad "unit_f2"; "$OUT/u2" | tail -3; }
 g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -I ../../include -I ../../../HAPI/include unit_f2.cpp -o "$OUT/u2s"
-"$OUT/u2s" | tail -1 | grep -q '^OK' && ok "ASan+UBSan" || bad "unit_f2 under sanitizers"
+lastok "$OUT/u2s" && ok "ASan+UBSan" || bad "unit_f2 under sanitizers"
 if command -v clang++ >/dev/null; then
-  clang++ -std=c++17 -O2 -Wall -Wextra -I ../../include -I ../../../HAPI/include unit_f2.cpp -o "$OUT/u2c" && "$OUT/u2c" | tail -1 | grep -q '^OK' && ok "clang++ $(clang++ -dumpversion)" || bad "unit_f2 under clang"
+  clang++ -std=c++17 -O2 -Wall -Wextra -I ../../include -I ../../../HAPI/include unit_f2.cpp -o "$OUT/u2c" && lastok "$OUT/u2c" && ok "clang++ $(clang++ -dumpversion)" || bad "unit_f2 under clang"
 fi
 
 echo; echo "=== F2.2 compile-fail: each case is rejected with its own message ==="
@@ -60,18 +61,18 @@ w=$(grep -c warning "$OUT/cc_f2.txt" || true)
 "$OUT/f2_full" > "$OUT/f2_full.txt"; sed 's/^/  /' "$OUT/f2_full.txt"
 tail -1 "$OUT/f2_full.txt" | grep -q '^OK' && [ "$w" = 0 ] && ok "g++ -O2, 0 warnings: F5/F5b scenarios (F2's changed expectations listed in HANDOFF) + back-off on a stuck root and a stuck channel (Stale, not Gone; probes at 100/200/400 ms; interval resets), the return path at the top, coalescing" || bad "F2 composition (warnings=$w)"
 g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -DF5_STEP=10 -DF5_COUNT -DF5_TAP $INC roundF5.cpp -o "$OUT/f2_san"
-"$OUT/f2_san" | tail -1 | grep -q '^OK' && ok "ASan+UBSan" || bad "F2 composition under sanitizers"
+lastok "$OUT/f2_san" && ok "ASan+UBSan" || bad "F2 composition under sanitizers"
 if command -v clang++ >/dev/null; then
-  clang++ -std=c++17 -O2 -Wall -Wextra -DF5_STEP=10 -DF5_COUNT -DF5_TAP $INC roundF5.cpp -o "$OUT/f2_clang" && "$OUT/f2_clang" | tail -1 | grep -q '^OK' && ok "clang++ $(clang++ -dumpversion)" || bad "F2 composition under clang"
+  clang++ -std=c++17 -O2 -Wall -Wextra -DF5_STEP=10 -DF5_COUNT -DF5_TAP $INC roundF5.cpp -o "$OUT/f2_clang" && lastok "$OUT/f2_clang" && ok "clang++ $(clang++ -dumpversion)" || bad "F2 composition under clang"
 fi
 for st in 7 8 9; do
   g++ -std=c++17 -O2 -Wall -Wextra -DF5_STEP=$st $INC roundF5.cpp -o "$OUT/f2_$st" 2> "$OUT/cc_f2_$st.txt" || { bad "F5_STEP=$st does not compile"; continue; }
-  [ "$(grep -c warning "$OUT/cc_f2_$st.txt" || true)" = 0 ] && "$OUT/f2_$st" | tail -1 | grep -q '^OK' && ok "F5_STEP=$st (0 warnings): no faults -> R3's checksum" || bad "F5_STEP=$st"
+  [ "$(grep -c warning "$OUT/cc_f2_$st.txt" || true)" = 0 ] && lastok "$OUT/f2_$st" && ok "F5_STEP=$st (0 warnings): no faults -> R3's checksum" || bad "F5_STEP=$st"
 done
 g++ -std=c++17 -O2 -Wall -Wextra -DF5_STEP=10 -DF5_COUNT -DF5_TAP -DF5_SMALL_K $INC roundF5.cpp -o "$OUT/f2_small" 2> "$OUT/cc_small.txt"
-"$OUT/f2_small" | tail -1 | grep -q '^OK' && [ "$(grep -c warning "$OUT/cc_small.txt" || true)" = 0 ] && ok "K overflow is loud: the row past the last slot reports Fail(Overflow) once through _serve(), and the counter stays" || bad "capacity test with the return path"
+lastok "$OUT/f2_small" && [ "$(grep -c warning "$OUT/cc_small.txt" || true)" = 0 ] && ok "K overflow is loud: the row past the last slot reports Fail(Overflow) once through _serve(), and the counter stays" || bad "capacity test with the return path"
 g++ -std=c++17 -O2 -Wall -Wextra -DF5_STEP=10 -DF5_COUNT -DF5_TAP -DF5_OVERALL_MS=60 $INC roundF5.cpp -o "$OUT/f2_over" 2> "$OUT/cc_over.txt"
-"$OUT/f2_over" | tail -1 | grep -q '^OK' && [ "$(grep -c warning "$OUT/cc_over.txt" || true)" = 0 ] && ok "an overall deadline shorter than the loop cuts a device's retries (2 operations, not 3), reported as Timeout" || bad "overall deadline on a device"
+lastok "$OUT/f2_over" && [ "$(grep -c warning "$OUT/cc_over.txt" || true)" = 0 ] && ok "an overall deadline shorter than the loop cuts a device's retries (2 operations, not 3), reported as Timeout" || bad "overall deadline on a device"
 
 echo; echo "=== F2.5 mutation checks (in the app): each broken policy must make the scenarios fail ==="
 mutate5() {  # name file sed-expression [extra g++ flags]

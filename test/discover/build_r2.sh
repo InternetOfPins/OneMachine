@@ -9,6 +9,7 @@
 # packet-capture claim is checked below without a real broker; the live-broker leg stays in R&D.
 set -u
 cd "$(dirname "$0")"
+. ../tools/lastok.sh
 HAPI=${HAPI:-../../../HAPI}; ONEBUS=${ONEBUS:-../../../OneBus}
 INC="-I ../../include -I $HAPI/include -I $ONEBUS/include -DR2_NO_MQTT"
 OUT=$(mktemp -d); BROKER_PID=""
@@ -25,11 +26,11 @@ else
   bad "round2 native"; grep -E "^FAIL|^first" "$OUT/r2.out" | head; fi
 
 echo; echo "=== native -O1 -fsanitize=address,undefined ==="
-if g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC round2.cpp -o "$OUT/r2san" && "$OUT/r2san" | tail -1 | grep -q "^OK"; then
+if g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC round2.cpp -o "$OUT/r2san" && lastok "$OUT/r2san"; then
   ok "round2 under ASan+UBSan"; else bad "round2 under ASan+UBSan"; fi
 if command -v clang++ >/dev/null; then
   echo; echo "=== native clang++ $(clang++ -dumpversion) -O2 ==="
-  if clang++ -std=c++17 -O2 -Wall -Wextra $INC round2.cpp -o "$OUT/r2clang" && "$OUT/r2clang" | tail -1 | grep -q "^OK"; then
+  if clang++ -std=c++17 -O2 -Wall -Wextra $INC round2.cpp -o "$OUT/r2clang" && lastok "$OUT/r2clang"; then
     ok "round2 under clang"; else bad "round2 under clang"; fi
 fi
 

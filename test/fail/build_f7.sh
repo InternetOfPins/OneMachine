@@ -4,6 +4,7 @@
 #   AVR: cost with and without Health composed, indirect calls, forbidden symbols, simavr checksum parity
 set -e
 cd "$(dirname "$0")"
+. ../tools/lastok.sh
 INC="-I ../../include -I ../../../HAPI/include -I ../../../OneBus/include"
 INCABS="-I $(cd ../../include && pwd) -I $(cd ../../../HAPI/include && pwd) -I $(cd ../../../OneBus/include && pwd)"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
@@ -22,11 +23,11 @@ done
 
 echo; echo "=== F7.2 sanitizers and clang, on the default build ==="
 g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all $INC roundF7.cpp -o "$OUT/f7san"
-"$OUT/f7san" | tail -1 | grep -q '^OK' && ok "ASan+UBSan" || bad "under sanitizers"
+lastok "$OUT/f7san" && ok "ASan+UBSan" || bad "under sanitizers"
 if command -v clang++ >/dev/null; then
   clang++ -std=c++17 -O2 -Wall -Wextra $INC roundF7.cpp -o "$OUT/f7clang" 2> "$OUT/cc_clang.txt"
   w=$(grep -c warning "$OUT/cc_clang.txt" || true)
-  "$OUT/f7clang" | tail -1 | grep -q '^OK' && [ "$w" = 0 ] && ok "clang++ $(clang++ -dumpversion), 0 warnings" || bad "under clang (warnings=$w)"
+  lastok "$OUT/f7clang" && [ "$w" = 0 ] && ok "clang++ $(clang++ -dumpversion), 0 warnings" || bad "under clang (warnings=$w)"
 fi
 
 echo; echo "=== F7.3 mutations: each a sed-patched copy of the real header, not a build-time switch; each must make the scenarios fail ==="

@@ -4,6 +4,7 @@
 #   AVR: the bare composition against discoverCompose R3's own image, cost per component, indirect calls, simavr parity
 set -e
 cd "$(dirname "$0")"
+. ../tools/lastok.sh
 INC="-I ../../include -I ../../../HAPI/include -I ../../../OneBus/include"
 INCABS="-I $(cd ../../include && pwd) -I $(cd ../../../HAPI/include && pwd) -I $(cd ../../../OneBus/include && pwd)"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
@@ -17,7 +18,7 @@ echo "=== F5.1 native: no failure component chosen is discoverCompose R3 (its ch
 for st in 0 1 2 3 4 5; do
   g++ -std=c++17 -O2 -Wall -Wextra -DF5_STEP=$st $INC roundF5.cpp -o "$OUT/f5_$st" 2> "$OUT/cc_$st.txt" || { bad "F5_STEP=$st does not compile"; cat "$OUT/cc_$st.txt"; continue; }
   w=$(grep -c warning "$OUT/cc_$st.txt" || true)
-  if "$OUT/f5_$st" | tail -1 | grep -q '^OK' && [ "$w" = 0 ]; then ok "F5_STEP=$st (0 warnings): no faults -> R3's checksum"; else bad "F5_STEP=$st (warnings=$w)"; "$OUT/f5_$st" | tail -3; fi
+  if lastok "$OUT/f5_$st" && [ "$w" = 0 ]; then ok "F5_STEP=$st (0 warnings): no faults -> R3's checksum"; else bad "F5_STEP=$st (warnings=$w)"; "$OUT/f5_$st" | tail -3; fi
 done
 
 echo; echo "=== F5.2 native: the scenarios on the full composition ==="
@@ -27,15 +28,15 @@ w=$(grep -c warning "$OUT/cc_full.txt" || true)
 "$OUT/f5_full" > "$OUT/full.txt"; cat "$OUT/full.txt" | sed 's/^/  /'
 tail -1 "$OUT/full.txt" | grep -q '^OK' && [ "$w" = 0 ] && ok "g++ $(g++ -dumpversion) -O2, 0 warnings: 14 scenarios (transient device, transient bus timeout, NACK -> Stale -> Alive, gone for good, stuck root, stuck root forever, stuck channel, stuck channel forever, root seen from a channel, Unknown, Unknown on a read leg, own fault across a bus fault, fault script)" || bad "full composition (warnings=$w)"
 g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -DF5_STEP=6 -DF5_COUNT -DF5_TAP $INC roundF5.cpp -o "$OUT/f5_san"
-"$OUT/f5_san" | tail -1 | grep -q '^OK' && ok "ASan+UBSan" || bad "full composition under sanitizers"
+lastok "$OUT/f5_san" && ok "ASan+UBSan" || bad "full composition under sanitizers"
 if command -v clang++ >/dev/null; then
   clang++ -std=c++17 -O2 -Wall -Wextra -DF5_STEP=6 -DF5_COUNT -DF5_TAP $INC roundF5.cpp -o "$OUT/f5_clang"
-  "$OUT/f5_clang" | tail -1 | grep -q '^OK' && ok "clang++ $(clang++ -dumpversion)" || bad "full composition under clang"
+  lastok "$OUT/f5_clang" && ok "clang++ $(clang++ -dumpversion)" || bad "full composition under clang"
 fi
 
 echo; echo "=== F5.2b native: a kind with more rows than its table holds (capacity) ==="
 g++ -std=c++17 -O2 -Wall -Wextra -DF5_STEP=6 -DF5_COUNT -DF5_TAP -DF5_SMALL_K $INC roundF5.cpp -o "$OUT/f5_small" 2> "$OUT/cc_small.txt" || { bad "capacity build"; cat "$OUT/cc_small.txt"; }
-"$OUT/f5_small" | tail -1 | grep -q '^OK' && [ "$(grep -c warning "$OUT/cc_small.txt" || true)" = 0 ] && ok "capacity: the row past the last slot is unprotected and counted, and never touches another row's state" || bad "capacity test"
+lastok "$OUT/f5_small" && [ "$(grep -c warning "$OUT/cc_small.txt" || true)" = 0 ] && ok "capacity: the row past the last slot is unprotected and counted, and never touches another row's state" || bad "capacity test"
 
 echo; echo "=== F5.2c native: the bus-return hooks declared (-DF5_RECHECK): FCal reinitOnBusReturn, FSensorB recheck ==="
 for st in 6 10; do
@@ -45,13 +46,13 @@ for st in 6 10; do
   if tail -1 "$OUT/re$st.txt" | grep -q '^OK' && [ "$w" = 0 ]; then ok "F5_STEP=$st with hooks, 0 warnings: a bus that came back asks the drivers below it, once each, only those; a device down for its own reasons is not asked"; else bad "F5_STEP=$st with hooks (warnings=$w)"; grep '^FAIL' "$OUT/re$st.txt" | head -5; fi
 done
 g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -DF5_STEP=10 -DF5_RECHECK -DF5_COUNT -DF5_TAP $INC roundF5.cpp -o "$OUT/f5_resan"
-"$OUT/f5_resan" | tail -1 | grep -q '^OK' && ok "hooks: ASan+UBSan" || bad "hooks under sanitizers"
+lastok "$OUT/f5_resan" && ok "hooks: ASan+UBSan" || bad "hooks under sanitizers"
 
 echo; echo "=== F5.2d native: a device without an ID register (-DF5_PRESENCE): the reprobe takes an ACK for its identity ==="
 for st in 6 10; do
   g++ -std=c++17 -O2 -Wall -Wextra -DF5_STEP=$st -DF5_PRESENCE -DF5_COUNT -DF5_TAP $INC roundF5.cpp -o "$OUT/f5_pr$st" 2> "$OUT/cc_pr$st.txt" || { bad "F5_STEP=$st presenceOnly does not compile"; cat "$OUT/cc_pr$st.txt"; continue; }
   w=$(grep -c warning "$OUT/cc_pr$st.txt" || true)
-  if "$OUT/f5_pr$st" | tail -1 | grep -q '^OK' && [ "$w" = 0 ]; then ok "F5_STEP=$st presenceOnly, 0 warnings: a returning device whose register 0 is not an id is Alive; without the flag it is refused and given up (scenario 2b, both builds)"; else bad "F5_STEP=$st presenceOnly (warnings=$w)"; fi
+  if lastok "$OUT/f5_pr$st" && [ "$w" = 0 ]; then ok "F5_STEP=$st presenceOnly, 0 warnings: a returning device whose register 0 is not an id is Alive; without the flag it is refused and given up (scenario 2b, both builds)"; else bad "F5_STEP=$st presenceOnly (warnings=$w)"; fi
 done
 
 echo; echo "=== F5.3 the writer audit: status is written only through World::setStatus ==="

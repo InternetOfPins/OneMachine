@@ -4,6 +4,7 @@
 # Exits non-zero if any claim does not hold.
 set -e
 cd "$(dirname "$0")"
+. ../tools/lastok.sh
 INC="-I ../../include -I ../../../HAPI/include -I ../../../OneBus/include"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 rc=0
@@ -12,12 +13,12 @@ bad()  { echo "FAIL: $*"; rc=1; }
 
 echo "=== 1. unit level (Deadline; controller on a scripted edge; mock time) ==="
 g++ -std=c++17 -O2 -Wall -Wextra $INC unit_f1.cpp -o "$OUT/unit"
-"$OUT/unit" | tail -2 | grep -q '^OK' && ok "g++ $(g++ -dumpversion) -O2, 0 warnings" || { bad "unit"; "$OUT/unit"; }
+LASTOK_N=2 lastok "$OUT/unit" && ok "g++ $(g++ -dumpversion) -O2, 0 warnings" || { bad "unit"; "$OUT/unit"; }
 g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all $INC unit_f1.cpp -o "$OUT/unit_san"
-"$OUT/unit_san" | tail -1 | grep -q '^OK' && ok "ASan+UBSan" || bad "unit under sanitizers"
+lastok "$OUT/unit_san" && ok "ASan+UBSan" || bad "unit under sanitizers"
 if command -v clang++ >/dev/null; then
   clang++ -std=c++17 -O2 -Wall -Wextra $INC unit_f1.cpp -o "$OUT/unit_clang"
-  "$OUT/unit_clang" | tail -1 | grep -q '^OK' && ok "clang++ $(clang++ -dumpversion)" || bad "unit under clang"
+  lastok "$OUT/unit_clang" && ok "clang++ $(clang++ -dumpversion)" || bad "unit under clang"
 fi
 "$OUT/unit" | grep sizeof
 
@@ -25,14 +26,14 @@ echo; echo "=== 2. integration: one device edge in discoverCompose's world, ever
 for st in 0 1 2 3 4 5; do
   g++ -std=c++17 -O2 -Wall -Wextra -DFAIL_STEP=$st $INC roundF1.cpp -o "$OUT/rf_$st" 2> "$OUT/cc_$st.txt" || { bad "step $st does not compile"; cat "$OUT/cc_$st.txt"; continue; }
   w=$(grep -c warning "$OUT/cc_$st.txt" || true)
-  if "$OUT/rf_$st" test | tail -1 | grep -q '^OK' && [ "$w" = 0 ]; then ok "FAIL_STEP=$st (native, 0 warnings): no faults -> checksum 0x5A03"; else bad "FAIL_STEP=$st (warnings=$w)"; "$OUT/rf_$st" test | tail -3; fi
+  if lastok "$OUT/rf_$st" test && [ "$w" = 0 ]; then ok "FAIL_STEP=$st (native, 0 warnings): no faults -> checksum 0x5A03"; else bad "FAIL_STEP=$st (warnings=$w)"; "$OUT/rf_$st" test | tail -3; fi
 done
 "$OUT/rf_5" test | grep -E 'per row'
 g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -DFAIL_STEP=5 $INC roundF1.cpp -o "$OUT/rf_san"
-"$OUT/rf_san" test | tail -1 | grep -q '^OK' && ok "full composition under ASan+UBSan" || bad "full under sanitizers"
+lastok "$OUT/rf_san" test && ok "full composition under ASan+UBSan" || bad "full under sanitizers"
 if command -v clang++ >/dev/null; then
   clang++ -std=c++17 -O2 -Wall -Wextra -DFAIL_STEP=5 $INC roundF1.cpp -o "$OUT/rf_clang"
-  "$OUT/rf_clang" test | tail -1 | grep -q '^OK' && ok "full composition under clang++" || bad "full under clang"
+  lastok "$OUT/rf_clang" test && ok "full composition under clang++" || bad "full under clang"
 fi
 
 echo; echo "=== 3. compile-fail: each case is rejected with its own message ==="
