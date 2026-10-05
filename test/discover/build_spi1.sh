@@ -5,6 +5,7 @@
 #   bmp    : the BMP280 as a machine of ItemDef nodes (bmp_machine.cpp, against a simulated chip with the datasheet's worked example), and its
 #            capture and restore under a failure edge: reset behind the host's back, unplugged, replaced (bmp_capture.cpp).
 #   link   : the Python consumer of the machine tree (python/onemachine/tree.py) against the air sensor on a simulated chip (test/link/build.sh).
+#   wiring : the rig's wiring spec checked, emitted as the App composition and diffed against the device's description (test/wiring/build.sh).
 #   irq    : the RC522's interrupt part (spi_irq.cpp) and the ESP8266 delivery components' pin rules (irq_delivery.cpp).
 #   AVR    : avr-g++ -Os atmega328p, linked over the real AVR SPI core -- it builds, and its size.
 # Exits non-zero if an assertion fails, a rule does not fire, or the AVR image does not build.
@@ -100,6 +101,9 @@ done
 
 echo; echo "=== the Python consumer of the machine tree (test/link): over a pipe and in-process (ctypes) ==="
 if command -v python3 >/dev/null; then bash ../link/build.sh 2>&1 | grep -E "^OK|^FAIL|Error|Traceback" || rc=1; else echo "(python3 not found: skipped)"; fi
+
+echo; echo "=== the wiring spec dry run (test/wiring): the rig's spec, its composition, the device's description; the IRQ on D4 refused ==="
+if python3 -c "import tomllib" 2>/dev/null; then bash ../wiring/build.sh > "$OUT/wiring.txt" 2>&1 || rc=1; grep -E "^OK|^FAIL|^emitted|error:|C\+\+ build|Traceback" "$OUT/wiring.txt"; else echo "(python3 3.11+ not found: skipped)"; fi
 
 if command -v avr-g++ >/dev/null; then
   echo; echo "=== avr-g++ $(avr-g++ -dumpversion) -Os atmega328p (linked, real SPI core) ==="
