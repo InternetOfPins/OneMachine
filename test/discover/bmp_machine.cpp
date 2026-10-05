@@ -131,10 +131,10 @@ int main() {
     "    #0 config reg 0xF5 default 0x90 rw range 0..255\n"
     "    #1 ctrl_meas reg 0xF4 default 0x57 rw range 0..255\n"
     "published\n"
-    "  temp -> 1/118/0 notify sync ro value scaled 2\n"
-    "  press -> 1/118/1 notify sync ro value scaled 2\n"
-    "  air -> 1/118/3 silent group 2\n"
-    "  ctrl_meas -> 1/118/3/1 silent reg 0xF4 default 0x57 rw range 0..255\n";
+    "  temp -> 1/118/0 notify sync ro value scaled 2 status alive\n"
+    "  press -> 1/118/1 notify sync ro value scaled 2 status alive\n"
+    "  air -> 1/118/3 silent group 2 status alive\n"
+    "  ctrl_meas -> 1/118/3/1 silent reg 0xF4 default 0x57 rw range 0..255 status alive\n";
   if (std::strcmp(s.b, want) != 0) { ++failures; std::printf("FAIL description:\n%s--- wanted:\n%s", s.b, want); }
   Str s2;
   bmpm::describe<M77, Chain<>>(s2, 1);

@@ -44,7 +44,7 @@
 #include "rc522.h"
 #include "irq_esp8266.h"
 #ifdef ONEMACHINE_LINK
-  #include "tree_ops.h"   // the link's ops over the published nodes (link/frame.h)
+  #include "tree_ops.h"   // the link's ops over the published nodes (role/link.h with payload ops)
 #endif
 #include "bmp280_machine.h"
 
@@ -53,7 +53,7 @@
 #endif
 
 // What the sketch says about itself goes to Log: the serial monitor. In the link build (env d1_mini_link, -DONEMACHINE_LINK) the serial port carries
-// the link's frames instead (link/frame.h), and the log says nothing.
+// the link's frames instead (role/link.h), and the log says nothing.
 #ifdef ONEMACHINE_LINK
 struct NullPrint : Print { size_t write(uint8_t) override { return 1; } size_t write(const uint8_t*, size_t n) override { return n; } };
 static NullPrint nullPrint;
@@ -340,24 +340,35 @@ static void faultTick(uint32_t now) {
   if (vanished && int32_t(now - vanishEnd) >= 0) { esp::OutPin<rstPin>::on(); vanished = false; Log.print(now); Log.println(F(" fault: RST high")); }
 }
 #ifdef ONEMACHINE_LINK
-// the link: the description, get and set by code, the changes since the last read (tree_ops.h), and the faults above (op 'f', one key)
-struct Extra {   // a code that only notifies: the card (an event with a value, the UID, 0 when it leaves)
-  template<typename P> static void describe(P& put) { const char* s = "  card -> 0/1 notify event ro value u32\n"; while (*s) put(*s++); }
+// the link (role/link.h with payload ops): the description, get and set by code, the changes since the last read, a row's status (tree_ops.h), and the
+// faults above (op 'f', one key)
+struct Extra {   // a code that only notifies: the card (an event with a value, the UID, 0 when it leaves), with the status of the reader's row
+  using Codes = Chain<CodeCard>;
+  static uint8_t status(uint8_t) { return RfidApp::reg.count > 1 ? uint8_t(RfidApp::reg.status(1)) : 2; }
+  template<typename P> static void describe(P& put) {
+    const char* s = "  card -> 0/1 notify event ro value u32 status "; while (*s) put(*s++);
+    const uint8_t st = status(0);
+    s = st == 0 ? "alive" : st == 1 ? "stale" : "gone"; while (*s) put(*s++);
+    put('\n');
+  }
 };
 using Ops = bmpm::TreeOps<Bmp, Published, Extra, airBus, 8>;
 struct SerialOut { static void put(uint8_t b) { Serial.write(b); } };
 static uint32_t linkNow = 0;
 struct LinkApp {
+  static constexpr bool payload = true;   // role::Link: describe() for op 'd', request() for the others
   template<typename P> static void describe(P& put) { Ops::describe(put); }
   template<typename R> static void request(uint8_t op, const uint8_t* in, uint16_t n, R& r) {
-    if (op == 'f') { if (n != 1) { r.status(link::BadLength); return; } faultKey(in[0], linkNow); r.status(link::Ok); return; }
+    if (op == 'f') { if (n != 1) { r.status(role::LinkBadLength); return; } faultKey(in[0], linkNow); r.status(role::LinkOk); return; }
     Ops::request(op, in, n, r);
   }
 };
-static link::Frame<SerialOut, LinkApp, 48, 96> frame;
+static role::Machine<>::Report linkReport;   // role::Link carries a role machine's frames; this device has no roles, its ops are the tree's
+static role::Link<role::Machine<>, SerialOut, LinkApp, 48, 96> link(linkReport, 0);
 static void faults(uint32_t now) {
   linkNow = now;
-  while (Serial.available()) frame.feed(uint8_t(Serial.read()), now);
+  while (Serial.available()) link.feed(uint8_t(Serial.read()), now);
+  Ops::watch();   // a row whose status moved is a change
   faultTick(now);
 }
 #else

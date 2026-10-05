@@ -4,7 +4,7 @@ a reset behind the host's back, an unplug with a set while it is gone, the notif
 import os, struct, sys
 D = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(D, '..', '..', 'python'))
-from onemachine import Tree, StreamLink, CtypesLink, OutOfRange, ReadOnly, UnknownCode
+from onemachine import Tree, StreamLink, CtypesLink, OutOfRange, ReadOnly, UnknownCode, Stale, Reading, Change
 
 CTYPES = len(sys.argv) > 1 and sys.argv[1] == 'ctypes'
 failures = 0
@@ -26,6 +26,7 @@ c = m.codes['air/ctrl_meas']
 check(c.kind == 'reg' and not c.ro and (c.lo, c.hi, c.default) == (0, 255, 0x57) and c.notify is None, 'air/ctrl_meas: a register, rw, 0..255, default 0x57, silent')
 check(m.codes['card'].notify == 'event' and m.codes['card'].unit == 'u32', 'card: an event, u32')
 check([c.num for c in m._codes] == list(range(6)), 'numbered in order')
+check(all(c.status == 'alive' for c in m._codes) and m.status('temp') == 'alive' and m.status('card') == 'alive', 'every code is alive in the description')
 
 # ---- values, scaled by the description -----------------------------------------------------------------------------------------
 advance(500)
@@ -69,12 +70,39 @@ op('x'); check(reg(0xF4) == 0x00, 'the chip lost its settings')
 advance(300)
 check(reg(0xF4) == 0x27 and reg(0xF5) == 0x90 and m.air.ctrl_meas == 0x27, 'restored, not the defaults')
 
-# ---- unplugged: a set while it is gone is the last intent --------------------------------------------------------------------
+# ---- unplugged: Stale, not a register that reads 0xFF; a set while it is gone is the last intent ----------------------------------
+m.changes()
+check(m.status('air') == 'alive', 'alive before')
+t_before = m.temp
 op('u'); advance(1500)
-m.air.ctrl_meas = 0x2B
+ch = m.changes()
+check(sorted(x.code for x in ch if x.status == 'stale') == ['air', 'air/config', 'air/ctrl_meas', 'press', 'temp'] and all(x.value is None for x in ch if x.status),
+      'the unplug is announced once, for every code of the part: %r' % ch)
+check(len([x for x in ch if x.status]) == 5, 'and only once')
+check(m.status('air') == 'stale' and m.status('temp') == 'stale' and m.status('card') == 'alive', 'stale for the part, alive for the card')
+check(m.status('air', refresh=True) == 'stale', 'and the device says so')
+try: m.temp; check(False, 'temp of a stale part raises')
+except Stale as e: check(e.status == 'stale' and e.last == t_before, 'Stale carries the status and the last value: %r' % e.last)
+try: m.air.ctrl_meas; check(False, 'a register of a stale part raises')
+except Stale as e: check(e.last == 0x27, 'a register answers its last set, not 0xFF: %r' % e.last)
+r = m.reading('air/ctrl_meas'); check(isinstance(r, Reading) and r.status == 'stale' and r.value == 0x27, 'reading() marks it instead: %r' % (r,))
+m.air.ctrl_meas = 0x2B                                           # the write cannot reach it: it is the last intent
+check(m.reading('air/ctrl_meas') == (0x2B, 'stale'), 'the intent is what it answers: %r' % (m.reading('air/ctrl_meas'),))
+check(m.changes() == [], 'a stale part says nothing more')
 op('p'); check(reg(0xF4) == 0x00, 'plugged in again: reset values')
 advance(3000)
 check(reg(0xF4) == 0x2B and m.air.ctrl_meas == 0x2B, 'the last intent came back')
+ch = m.changes()
+check(sorted(x.code for x in ch if x.status == 'alive') == ['air', 'air/config', 'air/ctrl_meas', 'press', 'temp'], 'and the return is announced: %r' % [x for x in ch if x.status])
+check(m.status('air') == 'alive' and m.status('temp') == 'alive', 'alive again')
+check(m.temp == t_before, 'and reads again')
+
+# ---- the card's row has a status of its own -------------------------------------------------------------------------------------
+op('z', bytes([2])); advance(20)
+ch = m.changes()
+check([x for x in ch if x.status] == [Change('card', status='gone')] and m.status('card') == 'gone' and m.status('air') == 'alive', 'the card\'s row gone: %r' % ch)
+op('z', bytes([0])); advance(20); m.changes()
+st, d = op('v', b'card'); check(st == 4 and d == bytes([0]), 'an event has no value: NoValue and the status alone')
 
 # ---- the card: an event with a value ------------------------------------------------------------------------------------------
 m.changes()

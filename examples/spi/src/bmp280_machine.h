@@ -13,6 +13,11 @@
 //   PublishedAt<Code, PathRef<M, 3, 1>, OnSync<fn>>   by a compile-time path into the machine (node #3, child #1): any node, a leaf of a group too
 //   Published<Code, Node, node, OnSync<fn>>           by an ItemRef, for a standalone object
 // A sync pass over the published nodes calls fn(value) for each one that changed.
+//
+// Never touch a node from a static initialiser: discover, set, publish, sync. A machine's nodes are objects with constructors of their own, held in
+// inline static members of a class template, and those are initialised in no defined order: a static initialiser that runs discovery writes into a
+// node before its constructor has run, and the constructor then wipes what was written (the captured registers, the Watch copies). Discover from
+// setup() or main().
 // describe() walks the machine and the published nodes and writes what a consumer needs: the codes, their path, their fields, which notify.
 #pragma once
 #include <stdint.h>
@@ -242,6 +247,15 @@ namespace bmpm {
     // one burst read of the measurement registers
     static void poll() { uint8_t b[6] = {}; Dev::rdN(0xF7, b, 6); compute(b); }
 
+    // The status of the row this machine's device is bound to in W's registry (discover::Status: Alive 0, Stale 1, Gone 2); Gone when it was never found.
+    // Every node of the machine has it: a part that is gone is Stale or Gone, not a register that reads 0xFF.
+    static uint8_t status() {
+      const discover::IDriver* d = discover::instOf<Driver>();
+      for (RowId r = 0; r < W::reg.count; ++r)
+        if (!W::reg.rows[r].isBus && W::reg.rows[r].drv == d) return uint8_t(W::reg.status(r));
+      return 2;
+    }
+
     // ---- discovery: the machine is the driver's one device ----------------------------------------------------------------
     // Under a failure edge (Mode::checked) each poll first reads the control registers back: a register that no longer holds what was captured
     // means the part was reset without the host knowing (Corrupt: Recover calls reinit(), which validates it and replays the capture). A part that
@@ -298,18 +312,24 @@ namespace bmpm {
   template<typename Code, typename Node, Node& ref, typename... Notify>
   using Published = ItemDef<Notify..., oneMenu::ItemRef<Node, ref>, Label<Code>, PubTag<Code, Node>>;
 
+  template<typename T, typename = void> struct HasCaptured : std::false_type {};
+  template<typename T> struct HasCaptured<T, std::void_t<decltype(std::declval<T&>().captured())>> : std::true_type {};
+
   // a node of a machine by compile-time path: P is the position in the machine, then in each group below it. It reaches any node, a leaf of
   // a group too, by resolving the path to the node's singleton (or to the child inside a group) on use. get(), changed() and sync() are the node's.
   template<typename M, unsigned... P>
   struct PathRef {
     static_assert(sizeof...(P) > 0, "PathRef: a path names a node of the machine");
     using Node = typename M::template NodeAt<P...>::type;
+    using Src = M;                                     // where its status comes from: the machine's device
     static constexpr unsigned depth = sizeof...(P);
     static constexpr unsigned path[sizeof...(P)] = {P...};
     template<typename O> struct Part : O {
       using O::O;
       static Node& ref() { return M::template resolve<P...>(); }
       static decltype(auto) get() { return ref().get(); }
+      // the value of a part that is not Alive: a register's last set (the intent that comes back), otherwise the last value read
+      static decltype(auto) last() { if constexpr (HasCaptured<Node>::value) return ref().captured(); else return ref().get(); }
       [[nodiscard]] static bool changed() { return ref().changed(); }
       static void sync() { ref().sync(); }
       template<typename V> static void set(V&& v) { ref().set(std::forward<V>(v)); }      // through the node: its limits, its capture, its register
@@ -382,8 +402,10 @@ namespace bmpm {
       str("  "); name(Pub::PubCode::name()); str(" -> "); dec(bus); put('/'); dec(M::addr);
       if constexpr (std::is_void<typename Pub::Path>::value) { put('/'); dec(unsigned(M::template IndexOf<Inner, typename M::Nodes>::value)); }
       else for (unsigned i = 0; i < Pub::Path::depth; ++i) { put('/'); dec(Pub::Path::path[i]); }
-      str(NotifiesSync<Pub>::value ? " notify sync" : " silent"); fields<Inner>(); put('\n');
+      str(NotifiesSync<Pub>::value ? " notify sync" : " silent"); fields<Inner>();
+      str(" status "); str(statusName(M::status())); put('\n');
     }
+    static const char* statusName(uint8_t st) { return st == 0 ? "alive" : st == 1 ? "stale" : "gone"; }
     template<typename M, typename... Pub> void publishedAll(hapi::Chain<Pub...>*, uint8_t bus) { (published<M, Pub>(bus), ...); }
   };
 

@@ -11,6 +11,10 @@
 //                                                                  when a value is outside the firmware's limits (nothing changes); Ok
 //                                                                  takes effect at once, and the next take() re-applies the command
 //   anything else goes to App::op(op, payload, n) -> a status (no payload), or Unknown when the app has no such op
+//   An app whose ops answer with a payload declares `static constexpr bool payload = true`, and then (instead of op()):
+//       static void describe(P& put)                                     the text reply of op 'd' (a char sink, called twice: counted, then sent)
+//       static void request(uint8_t op, const uint8_t* in, uint16_t n, role::LinkReply<N>& r)    every other op: r.status(st), r.put(byte), r.put32(v)
+//   (examples/spi: the machine tree's ops d, v, w, n, f.) An app without it is served exactly as before.
 //
 // role::Link<M, Out, App>: M a role::Machine, Out `static void put(uint8_t)`, App optional. feed(byte, now) as bytes arrive, then at the
 // cycle boundary take(cmd) (a new command, if one was accepted) and quiet(now) (true once, when no command was accepted for QuietMs:
@@ -21,6 +25,16 @@
 
 namespace role {
   constexpr uint8_t LinkOk = 0, LinkBadHash = 1, LinkBadLength = 2, LinkBadValue = 3, LinkUnknown = 0x80, LinkTooLong = 0x81;
+  constexpr uint8_t LinkNoValue = 4, LinkReadOnly = 0x82;      // for apps with payload ops: a group has no value; a write to a read-only code
+  // what an app's request() answers: a status and up to N payload bytes (more is TooLong)
+  template<unsigned N> struct LinkReply {
+    uint8_t st = LinkUnknown; uint8_t n = 0; uint8_t data[N]{}; bool over = false;
+    void status(uint8_t s) { st = s; }
+    void put(uint8_t b) { if (n < N) data[n++] = b; else over = true; }
+    void put32(int32_t v) { for (uint8_t i = 0; i < 4; ++i) put(uint8_t(uint32_t(v) >> (8 * i))); }
+  };
+  template<class A, class = void> struct PayloadOps : std::false_type {};
+  template<class A> struct PayloadOps<A, std::void_t<decltype(A::payload)>> : std::bool_constant<A::payload> {};
   struct NoApp { static int op(uint8_t, const uint8_t*, uint16_t) { return -1; } };
 
   // the longest request a link reads: a command frame, or a tuning frame when the machine has tuned roles
@@ -29,7 +43,7 @@ namespace role {
     if constexpr (M::tunable) { unsigned t = state::wire_size<typename M::Tuning>(); return t > c ? t : c; } else return c;
   }
 
-  template<class M, class Out, class App = NoApp, unsigned Cap = link_cap<M>()>
+  template<class M, class Out, class App = NoApp, unsigned Cap = link_cap<M>(), unsigned ReplyCap = 48>
   struct Link {
     using Command = typename M::Command; using Report = typename M::Report;
     const Report& report;
@@ -82,9 +96,16 @@ namespace role {
           if (st == state::Status::Ok) { M::tuning = t; retuned = true; }
           head(uint8_t(st), 0); return;
         } else break;
+        case 'd': if constexpr (PayloadOps<App>::value) { text([](Put& p) { App::describe(p); }); return; } else break;
         default: break;
       }
-      { int st = App::op(op, buf, len); head(st < 0 ? LinkUnknown : uint8_t(st), 0); }
+      if constexpr (PayloadOps<App>::value) {
+        LinkReply<ReplyCap> r;
+        App::request(op, buf, len, r);
+        if (r.over) { head(LinkTooLong, 0); return; }
+        head(r.st, r.n);
+        for (uint8_t i = 0; i < r.n; ++i) Out::put(r.data[i]);
+      } else { int st = App::op(op, buf, len); head(st < 0 ? LinkUnknown : uint8_t(st), 0); }
     }
   };
 }

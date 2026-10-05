@@ -111,6 +111,16 @@ jobs:
           git clone --depth 1 $ORG/HAPI.git HAPI
           git clone --depth 1 --branch "$BRANCH" $ORG/OneBus.git OneBus || git clone --depth 1 $ORG/OneBus.git OneBus
           git clone --depth 1 --branch "$BRANCH" $ORG/OneChip.git OneChip || git clone --depth 1 $ORG/OneChip.git OneChip
+      # The air sensor as a machine of OneMenu nodes and its Python consumer (test/discover/build_spi1.sh, test/link): they build against OneData, OneMenu and the
+      # libraries OneMenu includes, at the same branch name when it exists, else main.
+      - name: Clone OneData, OneMenu and what OneMenu includes
+        run: |
+          for r in OneData OneMenu OneItem OneOutput OneBit OnePin OneParse OneInput OneIO; do
+            git clone --depth 1 --branch "$BRANCH" $ORG/$r.git $r || git clone --depth 1 $ORG/$r.git $r
+          done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Install the AVR toolchain and simulator
         run: |
           sudo apt-get update

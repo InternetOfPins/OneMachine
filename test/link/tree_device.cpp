@@ -1,4 +1,4 @@
-// The spi example's air sensor as a device a consumer reaches over the link (link/frame.h, examples/spi/src/tree_ops.h), on simulated time and a
+// The spi example's air sensor as a device a consumer reaches over the link (role/link.h with payload ops, examples/spi/src/tree_ops.h), on simulated time and a
 // simulated BMP280 (test/support/mockBmpTwi.h: the datasheet's worked example at 0x76). Built two ways, as test/role does:
 //   a process   the link's bytes on stdin/stdout (check_tree.py over a pipe, as over a serial port)
 //   -DSIM_LIB   a shared library exporting onemachine_call / onemachine_cycle (check_tree.py in-process through ctypes)
@@ -6,6 +6,7 @@
 //   't' u32 ms     advance simulated time in 10 ms steps: the poll every 100 ms, the failure edges, the sync pass of the published nodes
 //   'x'            soft-reset the sensor behind the host's back          'u'  unplug it          'p'  plug it in again (reset values)
 //   'k' u32        a card arrives (the number is its UID; 0: it leaves): a code that only notifies
+//   'z' status     the status the card's row has from now on (0 alive, 1 stale, 2 gone)
 //   'R' reg        reply: the register's byte, read from the simulated chip (not through the machine)
 //   'W' reg v      write a register of the simulated chip (not through the machine)
 //   'S' u32 u32    the raw pressure and temperature the chip converts from now on
@@ -59,8 +60,15 @@ using PubConfig   = bmpm::PublishedAt<CodeConfig,   bmpm::PathRef<M, 3, 0>>;
 using PubCtrlMeas = bmpm::PublishedAt<CodeCtrlMeas, bmpm::PathRef<M, 3, 1>>;
 using Pubs = Chain<PubTemp, PubPress, PubAir, PubConfig, PubCtrlMeas>;
 
-struct Extra {   // a code that only notifies: the card (an event with a value, the UID, 0 when it leaves)
-  template<typename P> static void describe(P& put) { const char* s = "  card -> 0/1 notify event ro value u32\n"; while (*s) put(*s++); }
+struct Extra {   // a code that only notifies: the card (an event with a value, the UID, 0 when it leaves), with the status of its row
+  using Codes = Chain<CodeCard>;
+  static inline uint8_t cardStatus = 0;
+  static uint8_t status(uint8_t) { return cardStatus; }
+  template<typename P> static void describe(P& put) {
+    const char* s = "  card -> 0/1 notify event ro value u32 status "; while (*s) put(*s++);
+    s = cardStatus == 0 ? "alive" : cardStatus == 1 ? "stale" : "gone"; while (*s) put(*s++);
+    put('\n');
+  }
 };
 using Ops = bmpm::TreeOps<M, Pubs, Extra, 1, 8>;
 
@@ -70,34 +78,37 @@ static uint32_t now = 0;
 static void start() { static bool started = false; if (started) return; started = true; mockbmp::State::reset(); mockbmp::State::c77.unplug(); App::discover(); }
 
 struct LinkApp {
+  static constexpr bool payload = true;
   template<typename P> static void describe(P& put) { Ops::describe(put); }
   template<typename R> static void request(uint8_t op, const uint8_t* in, uint16_t n, R& r) {
     using mockbmp::State;
     switch (op) {
       case 't': {
-        if (n != 4) { r.status(link::BadLength); return; }
+        if (n != 4) { r.status(role::LinkBadLength); return; }
         const uint32_t ms = uint32_t(in[0]) | uint32_t(in[1]) << 8 | uint32_t(in[2]) << 16 | uint32_t(in[3]) << 24;
         for (uint32_t t = 0; t < ms; t += 10, now += 10) {
           if (now % 100 == 0) { App::pump(); bmpm::PublishAll<Pubs>::sync(); }
           App::tickBuses(now); Ticker::run(now);
+          Ops::watch();
         }
-        r.status(link::Ok); return;
+        r.status(role::LinkOk); return;
       }
-      case 'x': State::c76.softReset(); r.status(link::Ok); return;
-      case 'u': State::c76.unplug(); r.status(link::Ok); return;
-      case 'p': State::c76.replug(); r.status(link::Ok); return;
+      case 'x': State::c76.softReset(); r.status(role::LinkOk); return;
+      case 'u': State::c76.unplug(); r.status(role::LinkOk); return;
+      case 'p': State::c76.replug(); r.status(role::LinkOk); return;
       case 'k': {
-        if (n != 4) { r.status(link::BadLength); return; }
+        if (n != 4) { r.status(role::LinkBadLength); return; }
         Queue::note(CodeCard::num, int32_t(uint32_t(in[0]) | uint32_t(in[1]) << 8 | uint32_t(in[2]) << 16 | uint32_t(in[3]) << 24));
-        r.status(link::Ok); return;
+        r.status(role::LinkOk); return;
       }
-      case 'R': if (n != 1) { r.status(link::BadLength); return; } r.status(link::Ok); r.put(State::c76.regs[in[0]]); return;
+      case 'z': if (n != 1) { r.status(role::LinkBadLength); return; } Extra::cardStatus = in[0]; r.status(role::LinkOk); return;
+      case 'R': if (n != 1) { r.status(role::LinkBadLength); return; } r.status(role::LinkOk); r.put(State::c76.regs[in[0]]); return;
       case 'S': {
-        if (n != 8) { r.status(link::BadLength); return; }
+        if (n != 8) { r.status(role::LinkBadLength); return; }
         auto u = [&](int i) { return uint32_t(in[i]) | uint32_t(in[i + 1]) << 8 | uint32_t(in[i + 2]) << 16 | uint32_t(in[i + 3]) << 24; };
-        State::c76.setSample(u(0), u(4)); r.status(link::Ok); return;
+        State::c76.setSample(u(0), u(4)); r.status(role::LinkOk); return;
       }
-      case 'W': if (n != 2) { r.status(link::BadLength); return; } State::c76.regs[in[0]] = in[1]; r.status(link::Ok); return;
+      case 'W': if (n != 2) { r.status(role::LinkBadLength); return; } State::c76.regs[in[0]] = in[1]; r.status(role::LinkOk); return;
       default: Ops::request(op, in, n, r); return;
     }
   }
@@ -108,11 +119,12 @@ struct BufOut {
   static inline uint8_t* p = nullptr; static inline uint16_t cap = 0, n = 0;
   static void put(uint8_t b) { if (n < cap) p[n] = b; ++n; }
 };
-static link::Frame<BufOut, LinkApp, 48, 96> frame;
+static role::Machine<>::Report rep0;
+static role::Link<role::Machine<>, BufOut, LinkApp, 48, 96> link(rep0, 0);
 extern "C" __attribute__((visibility("default"))) int32_t onemachine_call(uint8_t op, const uint8_t* in, uint16_t n, uint8_t* out, uint16_t cap, uint32_t) {
   start(); BufOut::p = out; BufOut::cap = cap; BufOut::n = 0;
-  frame.feed(op, now); frame.feed(uint8_t(n), now); frame.feed(uint8_t(n >> 8), now);
-  for (uint16_t i = 0; i < n; ++i) frame.feed(in[i], now);
+  link.feed(op, now); link.feed(uint8_t(n), now); link.feed(uint8_t(n >> 8), now);
+  for (uint16_t i = 0; i < n; ++i) link.feed(in[i], now);
   return BufOut::n <= cap ? int32_t(BufOut::n) : -int32_t(BufOut::n);
 }
 extern "C" __attribute__((visibility("default"))) void onemachine_cycle(uint32_t) {}
@@ -120,9 +132,10 @@ extern "C" __attribute__((visibility("default"))) void onemachine_cycle(uint32_t
 struct StdOut { static void put(uint8_t b) { fputc(b, stdout); } };
 int main() {
   start();
-  static link::Frame<StdOut, LinkApp, 48, 96> frame;
+  static role::Machine<>::Report rep0;
+  static role::Link<role::Machine<>, StdOut, LinkApp, 48, 96> link(rep0, 0);
   int c;
-  while ((c = fgetc(stdin)) != EOF) { frame.feed(uint8_t(c), now); if (frame.phase == 0) fflush(stdout); }
+  while ((c = fgetc(stdin)) != EOF) { link.feed(uint8_t(c), now); if (link.phase == 0) fflush(stdout); }
   return 0;
 }
 #endif
