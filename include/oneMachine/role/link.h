@@ -11,7 +11,7 @@
 //                                                                  when a value is outside the firmware's limits (nothing changes); Ok
 //                                                                  takes effect at once, and the next take() re-applies the command
 //   anything else goes to App::op(op, payload, n) -> a status (no payload), or Unknown when the app has no such op
-//   An app whose ops answer with a payload declares `static constexpr bool payload = true`, and then (instead of op()):
+//   An app whose ops answer with a payload declares `static constexpr bool payload = true` (and, for replies over 48 bytes, `replyCap`), and then (instead of op()):
 //       static void describe(P& put)                                     the text reply of op 'd' (a char sink, called twice: counted, then sent)
 //       static void request(uint8_t op, const uint8_t* in, uint16_t n, role::LinkReply<N>& r)    every other op: r.status(st), r.put(byte), r.put32(v)
 //   (examples/spi: the machine tree's ops d, v, w, n, f.) An app without it is served exactly as before.
@@ -33,6 +33,9 @@ namespace role {
     void put(uint8_t b) { if (n < N) data[n++] = b; else over = true; }
     void put32(int32_t v) { for (uint8_t i = 0; i < 4; ++i) put(uint8_t(uint32_t(v) >> (8 * i))); }
   };
+  // how many payload bytes a reply may hold: the app's `static constexpr unsigned replyCap`, else 48 (a longer reply is TooLong)
+  template<class A, class = void> struct ReplyCapOf { static constexpr unsigned value = 48; };
+  template<class A> struct ReplyCapOf<A, std::void_t<decltype(A::replyCap)>> { static constexpr unsigned value = A::replyCap; };
   template<class A, class = void> struct PayloadOps : std::false_type {};
   template<class A> struct PayloadOps<A, std::void_t<decltype(A::payload)>> : std::bool_constant<A::payload> {};
   struct NoApp { static int op(uint8_t, const uint8_t*, uint16_t) { return -1; } };
@@ -43,7 +46,7 @@ namespace role {
     if constexpr (M::tunable) { unsigned t = state::wire_size<typename M::Tuning>(); return t > c ? t : c; } else return c;
   }
 
-  template<class M, class Out, class App = NoApp, unsigned Cap = link_cap<M>(), unsigned ReplyCap = 48>
+  template<class M, class Out, class App = NoApp, unsigned Cap = link_cap<M>()>
   struct Link {
     using Command = typename M::Command; using Report = typename M::Report;
     const Report& report;
@@ -100,7 +103,7 @@ namespace role {
         default: break;
       }
       if constexpr (PayloadOps<App>::value) {
-        LinkReply<ReplyCap> r;
+        LinkReply<ReplyCapOf<App>::value> r;
         App::request(op, buf, len, r);
         if (r.over) { head(LinkTooLong, 0); return; }
         head(r.st, r.n);

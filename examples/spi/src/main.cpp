@@ -357,6 +357,7 @@ struct SerialOut { static void put(uint8_t b) { Serial.write(b); } };
 static uint32_t linkNow = 0;
 struct LinkApp {
   static constexpr bool payload = true;   // role::Link: describe() for op 'd', request() for the others
+  static constexpr unsigned replyCap = 96;
   template<typename P> static void describe(P& put) { Ops::describe(put); }
   template<typename R> static void request(uint8_t op, const uint8_t* in, uint16_t n, R& r) {
     if (op == 'f') { if (n != 1) { r.status(role::LinkBadLength); return; } faultKey(in[0], linkNow); r.status(role::LinkOk); return; }
@@ -364,7 +365,7 @@ struct LinkApp {
   }
 };
 static role::Machine<>::Report linkReport;   // role::Link carries a role machine's frames; this device has no roles, its ops are the tree's
-static role::Link<role::Machine<>, SerialOut, LinkApp, 48, 96> link(linkReport, 0);
+static role::Link<role::Machine<>, SerialOut, LinkApp, 48> link(linkReport, 0);
 static void faults(uint32_t now) {
   linkNow = now;
   while (Serial.available()) link.feed(uint8_t(Serial.read()), now);

@@ -79,6 +79,7 @@ static void start() { static bool started = false; if (started) return; started 
 
 struct LinkApp {
   static constexpr bool payload = true;
+  static constexpr unsigned replyCap = 96;
   template<typename P> static void describe(P& put) { Ops::describe(put); }
   template<typename R> static void request(uint8_t op, const uint8_t* in, uint16_t n, R& r) {
     using mockbmp::State;
@@ -120,7 +121,7 @@ struct BufOut {
   static void put(uint8_t b) { if (n < cap) p[n] = b; ++n; }
 };
 static role::Machine<>::Report rep0;
-static role::Link<role::Machine<>, BufOut, LinkApp, 48, 96> link(rep0, 0);
+static role::Link<role::Machine<>, BufOut, LinkApp, 48> link(rep0, 0);
 extern "C" __attribute__((visibility("default"))) int32_t onemachine_call(uint8_t op, const uint8_t* in, uint16_t n, uint8_t* out, uint16_t cap, uint32_t) {
   start(); BufOut::p = out; BufOut::cap = cap; BufOut::n = 0;
   link.feed(op, now); link.feed(uint8_t(n), now); link.feed(uint8_t(n >> 8), now);
@@ -133,7 +134,7 @@ struct StdOut { static void put(uint8_t b) { fputc(b, stdout); } };
 int main() {
   start();
   static role::Machine<>::Report rep0;
-  static role::Link<role::Machine<>, StdOut, LinkApp, 48, 96> link(rep0, 0);
+  static role::Link<role::Machine<>, StdOut, LinkApp, 48> link(rep0, 0);
   int c;
   while ((c = fgetc(stdin)) != EOF) { link.feed(uint8_t(c), now); if (link.phase == 0) fflush(stdout); }
   return 0;
