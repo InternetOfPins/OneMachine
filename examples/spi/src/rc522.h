@@ -22,7 +22,7 @@ namespace rc522 {
   struct Card { using Value = uint32_t; static constexpr uint8_t id = 20, decimals = 0; static constexpr const char* name = "card"; };
 
   enum Reg : uint8_t {
-    CommandReg = 0x01, ComIrqReg = 0x04, ErrorReg = 0x06, FIFODataReg = 0x09, FIFOLevelReg = 0x0A,
+    CommandReg = 0x01, ComIEnReg = 0x02, DivIEnReg = 0x03, ComIrqReg = 0x04, ErrorReg = 0x06, FIFODataReg = 0x09, FIFOLevelReg = 0x0A,
     ControlReg = 0x0C, BitFramingReg = 0x0D, CollReg = 0x0E, ModeReg = 0x11, TxControlReg = 0x14, TxASKReg = 0x15,
     TModeReg = 0x2A, TPrescalerReg = 0x2B, TReloadRegH = 0x2C, TReloadRegL = 0x2D, VersionReg = 0x37,
   };
@@ -36,6 +36,95 @@ namespace rc522 {
     static_assert(enterQ > exitQ, "Health: enter threshold must exceed exit threshold (hysteresis)");
   };
 
+  // ---- the RC522's interrupt part ------------------------------------------------------------------------------
+  // A mode that has `using Irq = rc522::Interrupt<Delivery[, Observer[, Check[, Fallback]]]>` makes a command wait on the IRQ line instead of
+  // polling ComIrqReg: the poll starts the command and returns, and service() finishes it when the line is asserted, or after Interrupt::timeoutMs.
+  // The register values (what is enabled while a command runs, the pin driven push-pull) belong to the chip and are here; the App chooses the pin
+  // and how the line reaches the loop, and which of the optional parts it wants:
+  //   Delivery   begin(), arm() (before a command starts), ready() (the line is asserted)
+  //   Observer   seen(irq, line, outcome): rig diagnostics, after every command (default NoObserver)
+  //   Check      the line against the register after a command, as a device failure (LineCheck; default NoCheck: none)
+  //   Fallback   what a line fault does to the row (PollOnLineFault: it polls the register from then on; default NoFallback: the fault is the
+  //              chip's as far as the failure edge is concerned, and Recover initialises it again)
+  // The requests are enabled only while a command runs and cleared after it: the chip keeps its state across a reset of the host, and an
+  // enabled pending request would hold the line low at the next boot (a boot strapping pin must be high then).
+  struct NoObserver { static void seen(uint8_t, bool, const fail::Outcome&) {} };
+
+  // what the ComIrqReg bits mean for a Transceive: RxIRq or IdleIRq, a card answered; TimerIRq alone, nobody did
+  struct IrqMeaning {
+    static constexpr uint8_t rxIrq = 0x20, idleIrq = 0x10, timerIrq = 0x01;
+    static constexpr bool answered(uint8_t irq) { return (irq & (rxIrq | idleIrq)) != 0; }
+    static constexpr bool finished(uint8_t irq) { return (irq & (rxIrq | idleIrq | timerIrq)) != 0; }
+  };
+
+  struct NoCheck {
+    static constexpr bool on = false;
+    static fail::Outcome of(uint8_t, bool) { return fail::Outcome::Ok(); }
+  };
+
+  // The line against the register after a command, as a device failure: Fault with detail 1 when the line is asserted and the register shows no
+  // request that was enabled (spurious), 2 when it shows one and the line never was (the line is not connected, or not driven); Timeout when
+  // neither (the chip's own timer did not end the command).
+  struct LineCheck {
+    static constexpr bool on = true;
+    static constexpr uint8_t spurious = 1, missed = 2;
+    static constexpr bool isLineFault(const fail::Outcome& o) { return o.failed() && o.kind() == fail::Kind::Fault && (o.detail == spurious || o.detail == missed); }
+    static fail::Outcome of(uint8_t irq, bool line) {
+      const bool hit = IrqMeaning::finished(irq);
+      if (line && !hit) return fail::Outcome::Fail(fail::Kind::Fault, spurious);
+      if (!line && hit) return fail::Outcome::Fail(fail::Kind::Fault, missed);
+      if (!line && !hit) return fail::Outcome::Fail(fail::Kind::Timeout, irq);
+      return fail::Outcome::Ok();
+    }
+  };
+
+  struct NoFallback {
+    static constexpr bool on = false;
+    static constexpr bool handles(const fail::Outcome&) { return false; }
+    static fail::Outcome report(const fail::Outcome& o) { return o; }
+  };
+
+  // A line fault is the delivery's, not the chip's: the row polls ComIrqReg from then on (until the chip is initialised again, which tests the line
+  // again). The failure edge still hears of it, as a kind Recover does not act on (Refused, the line's detail kept): nothing initialises the chip.
+  struct PollOnLineFault {
+    static constexpr bool on = true;
+    static constexpr bool handles(const fail::Outcome& o) { return LineCheck::isLineFault(o); }
+    static fail::Outcome report(const fail::Outcome& o) { return fail::Outcome::Fail(fail::Kind::Refused, o.detail); }
+  };
+
+  template<typename Delivery, typename Observer = NoObserver, typename Check = NoCheck, typename Fallback = NoFallback>
+  struct Interrupt {
+    static_assert(!Fallback::on || Check::on, "a fallback acts on what the line check finds: give the interrupt part a check");
+    static constexpr bool on = true;
+    using FallbackPart = Fallback;
+    static constexpr uint8_t enable = 0x80 | IrqMeaning::rxIrq | IrqMeaning::timerIrq;   // ComIEnReg while a command runs: IRqInv, RxIEn, TimerIEn
+    static constexpr uint8_t idle = 0x80;                                                  // ComIEnReg between commands: IRqInv only
+    static constexpr uint8_t pushPull = 0x80;                                              // DivIEnReg IRQPushPull: the chip drives the line
+    static constexpr uint16_t timeoutMs = 40;                                              // the chip's own timer ends a command in 25 ms
+    static void begin()         { Delivery::begin(); }
+    static void arm()           { Delivery::arm(); }
+    static bool line()          { return Delivery::ready(); }
+    static fail::Outcome check(uint8_t irq, bool line) {
+      const fail::Outcome o = Check::of(irq, line);
+      Observer::seen(irq, line, o);
+      return o;
+    }
+  };
+
+  struct NoIrq {
+    static constexpr bool on = false;
+    static constexpr uint8_t enable = 0, idle = 0, pushPull = 0;
+    static constexpr uint16_t timeoutMs = 0;
+    using FallbackPart = NoFallback;
+    static void begin() {}
+    static void arm() {}
+    static bool line() { return false; }
+    static fail::Outcome check(uint8_t, bool) { return fail::Outcome::Ok(); }
+  };
+  template<typename...> using Void = void;
+  template<typename M, typename = void> struct IrqOf { using type = NoIrq; };
+  template<typename M> struct IrqOf<M, Void<typename M::Irq>> { using type = typename M::Irq; };
+
   // no failure handling: the driver polls and nothing is retried, probed or reported
   struct NoFail {
     static constexpr bool lifecycle = false, returnPath = false, idempotent = true;
@@ -47,6 +136,7 @@ namespace rc522 {
   struct Rc522 : discover::SpiDriverBase<Rc522<W, M, K>, W>, fail::DevEdge<Rc522<W, M, K>, W, M, K> {
     using B    = discover::SpiDriverBase<Rc522, W>;
     using Edge = fail::DevEdge<Rc522, W, M, K>;
+    using Irq  = typename IrqOf<M>::type;
     using Produces = hapi::Chain<Card>;
     static constexpr bool mayIsolate = true;   // a health monitor may quarantine the row (it has no isolate(): nothing cuts its supply)
     static constexpr uint8_t recoverMask = fail::bit(fail::Kind::Corrupt);   // a reset the host did not see: init again
@@ -61,7 +151,15 @@ namespace rc522 {
     // missStreak: consecutive polls that found no card while a UID is held; a departure is emitted at missPolls
     // inits: how many times the chip was initialised (the first is at discovery)
     // corrupt: canary failures in a row while the ID still answers
-    struct DeviceState { uint32_t uid; uint16_t bccErrors, collisions, initTries, inits; uint8_t missStreak, corrupt; };
+    // The poll in flight, with an interrupt part only: phase (Rest: none), rx (the UID answer), limit (the deadline of the command in flight), fallen
+    // (the row polls the register: a line fault with a fallback). It outlives the call that started it, so each row holds one. Without an interrupt
+    // part the poll runs inside one call and none of this exists.
+    enum Phase : uint8_t { Rest, Wake0, Wake1, Anti };
+    struct PollState { fail::Deadline limit; uint8_t phase, rx[5]; bool fallen; };
+    struct NoPoll {};
+    struct DeviceState : std::conditional_t<Irq::on, PollState, NoPoll> { uint32_t uid; uint16_t bccErrors, collisions, initTries, inits; uint8_t missStreak, corrupt; };
+    static PollState& pollOf(RowId row) { return B::dev(row); }   // with an interrupt part
+    static constexpr bool serves = Irq::on;                       // has a service(row, now) for the loop (fail::Services)
     static constexpr uint8_t corruptMax = 3;   // Corrupts in a row (initialised again each time) before the chip counts as not there
     static constexpr uint8_t missPolls = 3;
 
@@ -86,7 +184,9 @@ namespace rc522 {
     // allows 150). Writes made before that are lost and the antenna stays off, and PowerDown may not show the whole
     // window: so the configuration is then written until it reads back.
     static void init(RowId row) {
-      ++B::dev(row).inits;
+      auto& st = B::dev(row);
+      ++st.inits;
+      if constexpr (Irq::on) { auto& p = pollOf(row); p.phase = Rest; p.limit.disarm(); p.fallen = false; }   // the reset ends any command in flight; the line is tried again
       wr(row, TReloadRegL, 0x5A);
       wr(row, CommandReg, SoftReset);
       for (uint16_t i = 0; i < 60000 && rd(row, TReloadRegL) != 0x00; ++i) {}
@@ -99,29 +199,41 @@ namespace rc522 {
         wr(row, TxASKReg, 0x40);       // 100% ASK
         wr(row, ModeReg, 0x3D);        // CRC preset 0x6363
         wr(row, TxControlReg, uint8_t(rd(row, TxControlReg) | 0x03));   // antenna on
+        if constexpr (Irq::on) { wr(row, DivIEnReg, Irq::pushPull); wr(row, ComIEnReg, Irq::idle); }   // the IRQ pin driven, nothing enabled
         if (configured(row)) { B::dev(row).initTries = uint16_t(i + 1); return; }
       }
     }
 
-    // one exchange with a card: FIFO in, Transceive, wait for the receive (or the timer), FIFO out.
-    // Returns the bytes received, 0 when nothing answered, -1 on an error (collision, parity, protocol, overflow).
-    static int8_t transceive(RowId row, const uint8_t* tx, uint8_t n, uint8_t* rx, uint8_t max, uint8_t lastBits) {
+    // One exchange with a card, in two halves. start(): FIFO in, Transceive, StartSend; it returns at once.
+    static void start(RowId row, const uint8_t* tx, uint8_t n, uint8_t lastBits) {
       wr(row, CommandReg, Idle);
       wr(row, ComIrqReg, 0x7F);             // clear every interrupt request bit
+      if constexpr (Irq::on) { if (!pollOf(row).fallen) { Irq::arm(); wr(row, ComIEnReg, Irq::enable); } }
       wr(row, FIFOLevelReg, 0x80);          // flush the FIFO
       for (uint8_t i = 0; i < n; ++i) wr(row, FIFODataReg, tx[i]);
       wr(row, BitFramingReg, lastBits);
       wr(row, CommandReg, Transceive);
       wr(row, BitFramingReg, uint8_t(lastBits | 0x80));   // StartSend
-      uint8_t irq = 0;
-      for (uint16_t i = 0; i < 2000; ++i) { irq = rd(row, ComIrqReg); if (irq & 0x31) break; }   // RxIRq, IdleIRq, TimerIRq
+    }
+
+    // finish(): what the command came to, given the ComIrqReg value read at its end. Returns the bytes received, 0 when nothing
+    // answered, -1 on an error (collision, parity, protocol, overflow).
+    static int8_t finish(RowId row, uint8_t irq, uint8_t* rx, uint8_t max) {
       wr(row, BitFramingReg, 0x00);
-      if (!(irq & 0x30)) return 0;          // the timer ran out (or the loop did): no card answered
-      if (rd(row, ErrorReg) & 0x1B) return -1;   // BufferOvfl, CollErr, ParityErr, ProtocolErr
+      if (!IrqMeaning::answered(irq)) return 0;   // the timer ran out (or the wait did): no card answered
+      if (rd(row, ErrorReg) & 0x1B) return -1;    // BufferOvfl, CollErr, ParityErr, ProtocolErr
       uint8_t got = rd(row, FIFOLevelReg);
       if (got > max) got = max;
       for (uint8_t i = 0; i < got; ++i) rx[i] = rd(row, FIFODataReg);
       return int8_t(got);
+    }
+
+    // The whole exchange, waiting for the chip: the register is polled until it says the command is done (no interrupt part).
+    static int8_t transceive(RowId row, const uint8_t* tx, uint8_t n, uint8_t* rx, uint8_t max, uint8_t lastBits) {
+      start(row, tx, n, lastBits);
+      uint8_t irq = 0;
+      for (uint16_t i = 0; i < 2000; ++i) { irq = rd(row, ComIrqReg); if (irq & 0x31) break; }   // RxIRq, IdleIRq, TimerIRq
+      return finish(row, irq, rx, max);
     }
 
     // WUPA (7 bits): a card in the field answers ATQA. A card left READY by an anticollision without a SELECT ignores
@@ -133,12 +245,100 @@ namespace rc522 {
       return false;
     }
 
+    // ---- with an interrupt part: the poll as steps, one command each --------------------------------------------------------
+    // a WUPA, a second WUPA when it is silent, then the anticollision (cascade level 1)
+    static void startPoll(RowId row) {
+      const uint8_t wupa = 0x52;
+      pollOf(row).phase = Wake0;
+      start(row, &wupa, 1, 0x07);
+    }
+
+    // a command finished: the next step of the poll
+    static void advance(RowId row, int8_t got) {
+      auto& st = B::dev(row);
+      auto& p = pollOf(row);
+      if (p.phase == Wake0 || p.phase == Wake1) {
+        if (got == 2) {                                    // ATQA: a card is there
+          st.missStreak = 0; p.phase = Anti;
+          const uint8_t anticoll[2] = {0x93, 0x20};        // cascade level 1, no UID bits known
+          start(row, anticoll, 2, 0x00);
+          return;
+        }
+        if (p.phase == Wake0) { startPoll(row); p.phase = Wake1; return; }
+        p.phase = Rest;                                    // nobody answered twice
+        if (!st.uid) return;
+        if (++st.missStreak < missPolls) return;           // a card held still can miss a poll: it left only after missPolls
+        commit(row, 0);
+        return;
+      }
+      p.phase = Rest;
+      if (got < 0) { ++st.collisions; return; }
+      if (got != 5) return;
+      const uint8_t* r = p.rx;
+      if (uint8_t(r[0] ^ r[1] ^ r[2] ^ r[3]) != r[4]) { ++st.bccErrors; return; }
+      commit(row, (uint32_t(r[0]) << 24) | (uint32_t(r[1]) << 16) | (uint32_t(r[2]) << 8) | r[3]);
+    }
+
+    static void commit(RowId row, uint32_t uid) {
+      auto& st = B::dev(row);
+      if (uid != st.uid) { st.uid = uid; st.missStreak = 0; B::template emit<Card>(row, uid); }
+    }
+
+    // The end of the command in flight: by the line (read before the register, which is then released and cleared), or, for a row that fell
+    // back, by polling the register until the chip says it is done.
+    static int8_t complete(RowId row, fail::Outcome& check) {
+      uint8_t irq = 0;
+      check = fail::Outcome::Ok();
+      if (!pollOf(row).fallen) {
+        const bool line = Irq::line();
+        irq = rd(row, ComIrqReg);
+        wr(row, ComIEnReg, Irq::idle);      // the line is released before the requests are cleared
+        wr(row, ComIrqReg, 0x7F);
+        check = Irq::check(irq, line);
+      } else {
+        for (uint16_t i = 0; i < 2000; ++i) { irq = rd(row, ComIrqReg); if (IrqMeaning::finished(irq)) break; }
+      }
+      return finish(row, irq, pollOf(row).rx, 5);
+    }
+
+    // The loop's step, every iteration (fail::Services): the command in flight is finished when the line is asserted or after the timeout. Nothing
+    // waits here. A check that fails ends the poll and is reported to the failure edge as the device's failure; a line fault with a fallback
+    // is reported as the delivery's, the row polls the register from then on, and the answer the register gave is used.
+    static void service(RowId row, [[maybe_unused]] uint32_t now) {
+      if constexpr (Irq::on) {
+        auto& p = pollOf(row);
+        if (p.phase == Rest) return;
+        if (!p.limit.armed) p.limit.arm(now, Irq::timeoutMs);
+        if (!Irq::line() && !p.limit.due(now)) return;
+        p.limit.disarm();
+        W::route(W::reg.rows[row].parent);
+        fail::Outcome check;
+        const int8_t got = complete(row, check);
+        if (!check.isOk()) {
+          if (Irq::FallbackPart::handles(check)) {
+            p.fallen = true; report(row, Irq::FallbackPart::report(check));
+            advance(row, got);
+            while (p.phase != Rest) { fail::Outcome ok; advance(row, complete(row, ok)); }   // the rest of this poll, by the register
+            return;
+          }
+          p.phase = Rest; report(row, check); return;
+        }
+        advance(row, got);
+      }
+    }
+
+    // a failure found after the poll was accepted: the stack sees it as the poll's own
+    static void report(RowId row, fail::Outcome o) {
+      Edge::Tab::serve(row, fail::Cause::Fresh, [o]() -> fail::Outcome { return o; });
+    }
+
     static void reinit(RowId row) { init(row); }
 
     // the row went Stale: what was held about the card is unknown
     static void onStale(RowId row) {
       auto& st = B::dev(row);
       st.missStreak = 0; st.corrupt = 0;
+      if constexpr (Irq::on) { pollOf(row).phase = Rest; pollOf(row).limit.disarm(); }
       if (st.uid) { st.uid = 0; B::template emit<Card>(row, 0); }
     }
 
@@ -160,23 +360,30 @@ namespace rc522 {
       return fail::Outcome::Ok();
     }
 
+    // Without an interrupt part the whole poll runs here. With one it is started and service() carries it on; a row that fell back runs it here too.
     static void pollCard(RowId row) {
-      auto& st = B::dev(row);
-      uint32_t uid = 0;
-      if (!present(row)) {
-        if (!st.uid) return;
-        if (++st.missStreak < missPolls) return;   // a card held still can miss a poll: it left only after missPolls
+      if constexpr (Irq::on) {
+        if (pollOf(row).phase != Rest) return;
+        startPoll(row);
+        if (pollOf(row).fallen) while (pollOf(row).phase != Rest) { fail::Outcome ok; advance(row, complete(row, ok)); }
       } else {
-        st.missStreak = 0;
-        const uint8_t anticoll[2] = {0x93, 0x20};   // cascade level 1, no UID bits known
-        uint8_t r[5];
-        const int8_t got = transceive(row, anticoll, 2, r, 5, 0x00);
-        if (got < 0) { ++st.collisions; return; }
-        if (got != 5) return;
-        if (uint8_t(r[0] ^ r[1] ^ r[2] ^ r[3]) != r[4]) { ++st.bccErrors; return; }
-        uid = (uint32_t(r[0]) << 24) | (uint32_t(r[1]) << 16) | (uint32_t(r[2]) << 8) | r[3];
+        auto& st = B::dev(row);
+        uint32_t uid = 0;
+        if (!present(row)) {
+          if (!st.uid) return;
+          if (++st.missStreak < missPolls) return;   // a card held still can miss a poll: it left only after missPolls
+        } else {
+          st.missStreak = 0;
+          const uint8_t anticoll[2] = {0x93, 0x20};   // cascade level 1, no UID bits known
+          uint8_t r[5];
+          const int8_t got = transceive(row, anticoll, 2, r, 5, 0x00);
+          if (got < 0) { ++st.collisions; return; }
+          if (got != 5) return;
+          if (uint8_t(r[0] ^ r[1] ^ r[2] ^ r[3]) != r[4]) { ++st.bccErrors; return; }
+          uid = (uint32_t(r[0]) << 24) | (uint32_t(r[1]) << 16) | (uint32_t(r[2]) << 8) | r[3];
+        }
+        if (uid != st.uid) { st.uid = uid; st.missStreak = 0; B::template emit<Card>(row, uid); }
       }
-      if (uid != st.uid) { st.uid = uid; st.missStreak = 0; B::template emit<Card>(row, uid); }
     }
   };
 
