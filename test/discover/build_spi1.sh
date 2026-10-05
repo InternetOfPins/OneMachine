@@ -79,7 +79,7 @@ if command -v clang++ >/dev/null; then
 fi
 
 echo; echo "=== ESP8266 interrupt delivery (irq_delivery.cpp, host stub): the pins that compile, the ones rejected ==="
-DINC="$INC -I ../support/arduino_stub"
+DINC="$INC -I ../../../OneChip/include -I ../support/arduino_stub"   # the pins' facts: OneChip's esp8266Pins.h
 g++ -std=c++17 -Wall -Wextra -Werror $DINC irq_delivery.cpp -o "$OUT/idl" && "$OUT/idl" && echo "OK: Sampled<16> and IsrFlag<5> build" || { echo "FAIL: the delivery components do not build"; rc=1; }
 for pair in "NEG_D3:GPIO0, GPIO2 or GPIO15 (D3, D4, D8)" "NEG_D4:GPIO0, GPIO2 or GPIO15 (D3, D4, D8)" "NEG_D8:GPIO0, GPIO2 or GPIO15 (D3, D4, D8)" \
             "NEG_ISR16:GPIO16 has no interrupt: use Sampled" "NEG_PAST:an ESP8266 has GPIO0 to GPIO16"; do
@@ -100,7 +100,7 @@ for pair in "NEG_ID_IDLE:an SPI id of 0x00 or 0xFF is what an empty slot reads" 
 done
 
 echo; echo "=== the Python consumer of the machine tree (test/link): over a pipe and in-process (ctypes) ==="
-if command -v python3 >/dev/null; then bash ../link/build.sh 2>&1 | grep -E "^OK|^FAIL|Error|Traceback" || rc=1; else echo "(python3 not found: skipped)"; fi
+if command -v python3 >/dev/null; then bash ../link/build.sh > "$OUT/link.txt" 2>&1 || rc=1; grep -E "^OK|^FAIL|Error|Traceback" "$OUT/link.txt"; else echo "(python3 not found: skipped)"; fi
 
 echo; echo "=== the wiring spec dry run (test/wiring): the rig's spec, its composition, the device's description; the IRQ on D4 refused ==="
 if python3 -c "import tomllib" 2>/dev/null; then bash ../wiring/build.sh > "$OUT/wiring.txt" 2>&1 || rc=1; grep -E "^OK|^FAIL|^emitted|error:|C\+\+ build|Traceback" "$OUT/wiring.txt"; else echo "(python3 3.11+ not found: skipped)"; fi

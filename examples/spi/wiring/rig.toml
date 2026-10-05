@@ -1,7 +1,7 @@
 # The rig's wiring (examples/spi), written by hand: the parts, their pins, and the codes the device publishes, by the same names.
 # python3 -m onemachine.wiring check|emit|diff examples/spi/wiring/rig.toml   (python/onemachine/wiring.py)
 # TOML, not the essay's YAML: Python reads it with the standard library (tomllib).
-board = "wemos-d1-mini"          # its pins: OneChip's chips/esp8266/esp8266Device.h (D0..D8 and what each one is)
+board = "wemos-d1-mini"          # its pins and their facts: OneChip's Esp8266Pins, read through facts.txt (examples/spi/describe.cpp)
 
 [i2c]
 sda = "D2"

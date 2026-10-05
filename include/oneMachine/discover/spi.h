@@ -32,6 +32,8 @@ namespace discover {
     static_assert(((V != 0x00 && V != 0xFF) && ...),
                   "an SPI id of 0x00 or 0xFF is what an empty slot reads: it cannot identify a device");
     static constexpr bool has(uint8_t v) { return ((v == V) || ...); }
+    static constexpr uint8_t list[] = {V...};          // in order, for a manifest
+    static constexpr unsigned count = sizeof...(V);
   };
 
   template<uint8_t S> struct AtSlot { static constexpr uint8_t slot = S; };

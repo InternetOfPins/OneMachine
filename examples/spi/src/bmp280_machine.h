@@ -28,6 +28,7 @@
 #include <oneMachine/discover/identify.h>
 #include <oneMachine/state/face.h>
 #include <oneMachine/fail/devedge.h>
+#include <oneMachine/discover/manifest.h>
 
 namespace bmpm {
 
@@ -35,6 +36,18 @@ namespace bmpm {
   using oneMenu::ItemDef;
   using oneMenu::MenuDef;
   using oneMenu::StaticBody;
+
+  // ---- the manifest: what the part needs and publishes (discover/manifest.h) -------------------------------------------------------
+  // On I2C, at 0x76 or 0x77 (its SDO pin), with chip id 0x58 (BMP280) or 0x60 (BME280, the same registers here). No lines of its own: only the bus's.
+  // What it publishes is its machine's Nodes (Machine<...>::Nodes): a description walk lists them.
+  struct Manifest {
+    static constexpr const char* name = "bmp280";
+    static constexpr const char* bus = "i2c";
+    static constexpr uint8_t addrs[] = {0x76, 0x77};
+    static constexpr uint8_t ids[] = {0x58, 0x60};
+    template<typename F> static constexpr void pins(F&&) {}
+    static constexpr bool at(uint8_t a) { return a == addrs[0] || a == addrs[1]; }
+  };
 
   // ---- the Criteria: which device a machine is -----------------------------------------------------------------------------------
   template<uint8_t A> struct Addr { static constexpr uint8_t addr = A; };
@@ -89,6 +102,7 @@ namespace bmpm {
   template<typename W, typename Criteria = Addr<0x76>, typename Mode = Plain>
   struct Machine {
     static constexpr uint8_t addr = Criteria::addr;
+    static_assert(Manifest::at(Criteria::addr), "a BMP280/BME280 answers at 0x76 or 0x77 (its SDO pin)");
     // the device: its data and its register access. Static, as the machine is.
     struct Dev {
       static constexpr uint8_t addr = Criteria::addr;
@@ -264,7 +278,7 @@ namespace bmpm {
       using B = discover::DriverBase<Driver, W>;
       using Edge = fail::DevEdge<Driver, W, Mode, 1>;
       static constexpr bool polled = true;
-      static constexpr uint8_t addrLo = Criteria::addr, addrHi = Criteria::addr, idReg = 0xD0, id = 0x58;
+      static constexpr uint8_t addrLo = Criteria::addr, addrHi = Criteria::addr, idReg = 0xD0, id = Manifest::ids[0];
       static constexpr uint8_t recoverMask = fail::bit(fail::Kind::Corrupt);
       static constexpr bool reinitOnBusReturn = true;     // a bus that comes back may have taken the part's supply: validate it again
       static void init(RowId) { Machine::init(); }
@@ -295,7 +309,7 @@ namespace bmpm {
     };
     // the BME280 answers 0x60 at the same register: a second entry, the same driver
     using UseBmp = discover::Use<discover::Own, Driver>;
-    using UseBme = discover::Use<discover::IdProbe<0xD0, 0x60, Criteria::addr, Criteria::addr>, Driver>;
+    using UseBme = discover::Use<discover::IdProbe<0xD0, Manifest::ids[1], Criteria::addr, Criteria::addr>, Driver>;
     using Entries = hapi::Chain<UseBmp, UseBme>;
 
     // ---- the index of a node in the machine -------------------------------------------------------------------------------

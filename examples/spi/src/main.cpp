@@ -74,8 +74,8 @@ using discover::RowId;
 using hapi::Chain;
 namespace esp = hw::esp8266;
 
-using Twi = esp::Esp8266TwiMaster<4, 5, 100000>;                                      // SDA D2, SCL D1
-using Spi = hapi::APIOf<oneBus::SpiAPI, oneBus::SpiSlots<esp::OutPin<15>, esp::OutPin<0>>,   // slot 0 D8, slot 1 D3
+using Twi = esp::Esp8266TwiMaster<airTree::Wiring::sda, airTree::Wiring::scl, 100000>;                                      // SDA D2, SCL D1
+using Spi = hapi::APIOf<oneBus::SpiAPI, oneBus::SpiSlots<esp::OutPin<airTree::Wiring::rfidCs>, esp::OutPin<airTree::Wiring::emptyCs>>,   // slot 0 D8, slot 1 D3
                         oneBus::SpiMaster<4000000>, esp::Esp8266SpiCore>;
 
 using airTree::CodeTemp; using airTree::CodePress; using airTree::CodeCard;   // the codes the App publishes: air_tree.h
@@ -140,7 +140,7 @@ struct RfidMode {
   template<typename E> using DevStack = fail::Controller<E, fail::TickPart<fail::Retry<2>>, fail::Recover, fail::DetectError,
     fail::HoldOp<fail::Coalesce>, fail::Gate<50>, fail::TickPart<fail::Reprobe<500, 120>>, fail::LazyStatus>;
   template<typename Impl, typename W> using Access = fail::SpiAccess<Impl, W>;
-  using Irq = rc522::Interrupt<irq::Sampled<16>, IrqCounters, rc522::LineCheck, rc522::PollOnLineFault>;   // D0
+  using Irq = rc522::Interrupt<irq::Sampled<airTree::Wiring::rfidIrq>, IrqCounters, rc522::LineCheck, rc522::PollOnLineFault>;   // D0
 };
 using Rfid = rc522::Rc522<RfidApp, RfidMode, 1>;
 using RfidDrivers = discover::DriversIn<Chain<Rfid>>;
@@ -174,7 +174,7 @@ inline void IrqCounters::report(uint32_t now) {
   Log.println();
 }
 
-constexpr uint8_t rstPin = 2;    // D4: the RC522's RST
+constexpr uint8_t rstPin = airTree::Wiring::rfidRst;    // D4: the RC522's RST
 // The air sensor under failure handling: a bus edge and, per device, retry, recover (the part was reset without the host knowing), probe.
 struct AirMode {
   static constexpr bool checked = true, returnPath = false, idempotent = true, lifecycle = true;
@@ -353,7 +353,7 @@ struct Extra {   // a code that only notifies: the card (an event with a value, 
     s = st == 0 ? "alive" : st == 1 ? "stale" : "gone"; while (*s) put(*s++);
     put('\n');
   }
-  template<typename P> static constexpr void describeStatic(P& put) { airTree::cardLine(put); }
+  template<typename P> static constexpr void describeStatic(P& put) { airTree::describeStatic(put); }
 };
 using Ops = bmpm::TreeOps<Bmp, Published, Extra, airBus, 8>;
 struct SerialOut { static void put(uint8_t b) { Serial.write(b); } };

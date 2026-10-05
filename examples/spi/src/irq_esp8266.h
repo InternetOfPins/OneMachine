@@ -6,12 +6,14 @@
 // across a reset of the board and drives one of them low stops the next boot.
 #pragma once
 #include <Arduino.h>
+#include <chips/esp8266/esp8266Pins.h>   // the pins' facts: strap(), hasIrq(), gpio()
 
 namespace irq {
 
   template<uint8_t Pin> struct Esp8266Line {
-    static_assert(Pin <= 16, "an ESP8266 has GPIO0 to GPIO16");
-    static_assert(Pin != 0 && Pin != 2 && Pin != 15,
+    using Pins = hw::esp8266::Esp8266Pins;
+    static_assert(Pins::gpio(Pin), "an ESP8266 has GPIO0 to GPIO16");
+    static_assert(!Pins::strap(Pin),
                   "an interrupt line on GPIO0, GPIO2 or GPIO15 (D3, D4, D8): a request pending at reset holds the pin low and the board does not boot");
   };
 
@@ -22,7 +24,7 @@ namespace irq {
   };
 
   template<uint8_t Pin> struct IsrFlag : Esp8266Line<Pin> {
-    static_assert(Pin != 16, "GPIO16 has no interrupt: use Sampled");
+    static_assert(hw::esp8266::Esp8266Pins::hasIrq(Pin), "GPIO16 has no interrupt: use Sampled");
     static inline volatile bool flag = false;
     static void IRAM_ATTR isr() { flag = true; }
     static void begin() { pinMode(Pin, INPUT_PULLUP); attachInterrupt(digitalPinToInterrupt(Pin), isr, FALLING); }

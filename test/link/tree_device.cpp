@@ -61,7 +61,7 @@ struct Extra {   // a code that only notifies: the card (an event with a value, 
     s = cardStatus == 0 ? "alive" : cardStatus == 1 ? "stale" : "gone"; while (*s) put(*s++);
     put('\n');
   }
-  template<typename P> static constexpr void describeStatic(P& put) { airTree::cardLine(put); }
+  template<typename P> static constexpr void describeStatic(P& put) { airTree::describeStatic(put); }
 };
 using Ops = bmpm::TreeOps<M, Pubs, Extra, 1, 8>;
 

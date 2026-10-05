@@ -31,9 +31,11 @@ def key(name):                                           # a code in a raw reque
 if HASHED: check(m.description == open(os.path.join(DESC, d[5:13].decode() + '.txt')).read(), 'the text is the build output\'s')
 if not HASHED and DESC:                                  # the two walks: the text the device sends, without its statuses, is the build output's
     import re
-    files = [f for f in os.listdir(DESC) if f.endswith('.txt')]
+    files = [f for f in os.listdir(DESC) if re.fullmatch(r'[0-9a-f]{8}\.txt', f)]      # <hash>.txt (facts.txt is beside it)
     static = '\n'.join(re.sub(r' status (alive|stale|gone)$', '', l) for l in m.description.split('\n'))
-    check(len(files) == 1 and static == open(os.path.join(DESC, files[0])).read(), 'the text walk and the hash walk write the same description')
+    built = open(os.path.join(DESC, files[0])).read()
+    built = built[:built.index('wiring ')] if 'wiring ' in built else built      # the wiring lines are the build output's only (the text build is Round 6's)
+    check(len(files) == 1 and static == built, 'the text walk and the hash walk write the same description')
 check(list(m.codes) == ['temp', 'press', 'air', 'air/config', 'air/ctrl_meas', 'card'], 'the codes, in the device\'s order: %s' % list(m.codes))
 check(m.codes['temp'].scaled == 2 and m.codes['temp'].notify == 'sync' and m.codes['temp'].ro, 'temp: scaled 2, notifies, read-only')
 check(m.codes['air'].kind == 'group' and m.codes['air'].group_size == 2, 'air is a group of 2')

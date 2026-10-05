@@ -66,7 +66,7 @@ struct Extra {
   using Codes = Chain<CodeCard>;
   static uint8_t status(uint8_t) { return 0; }
   template<typename P> static void describe(P& put) { const char* s = "  card -> 0/1 notify event ro value u32 status alive\n"; while (*s) put(*s++); }
-  template<typename P> static constexpr void describeStatic(P& put) { airTree::cardLine(put); }
+  template<typename P> static constexpr void describeStatic(P& put) { airTree::describeStatic(put); }
 };
 using Ops = bmpm::TreeOps<M, Pubs, Extra, 1, 8>;
 struct UartOut { static void put(uint8_t b) { Uart::putch(b); } };

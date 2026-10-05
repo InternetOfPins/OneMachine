@@ -52,11 +52,29 @@ def _fnv(data, h=2166136261):
     for b in data: h = ((h ^ b) * 16777619) & 0xFFFFFFFF
     return h
 
+def wiring(text):
+    """The `wiring` section of a description: {'board': name, <line>: {role: (gpio, drive), ...}, ...} (bus lines `i2c`, `spi`; parts by name, with
+    `driver`; `at` for an address). Empty when the description has none (the text a device sends; the build output by hash has it)."""
+    out, seen = {}, False
+    for line in text.split('\n'):
+        if line.startswith('wiring '): seen = True; out['board'] = line[7:]; continue
+        if not seen or not line.startswith('  '): continue
+        w = line.split()
+        name, rest, entry = w[0], w[1:], {}
+        if rest and rest[0] not in ('sda', 'scl', 'sck', 'miso', 'mosi', 'cs', 'rst', 'irq', 'at'): entry['driver'], rest = rest[0], rest[1:]
+        i = 0
+        while i < len(rest):
+            if rest[i] == 'at': entry['at'] = int(rest[i + 1], 16); i += 2
+            else: entry[rest[i]] = (int(rest[i + 1]), rest[i + 2]); i += 3
+        out[name] = entry
+    return out
+
 def _parse(text):
     """The `published` section: one line per code, in the order the device numbers them."""
     codes, seen = [], False
     for line in text.split('\n'):
         if line == 'published': seen = True; continue
+        if seen and line and not line.startswith('  '): break               # the next section (the wiring): the codes are done
         if not seen or not line.startswith('  '): continue
         head, _, rest = line.strip().partition(' -> ')
         words = rest.split(' ')
