@@ -4,10 +4,12 @@
 //   RC522    SCK D5, MISO D6, MOSI D7, SDA (its CS) D8, RST D4 (held high here) or 3V3, IRQ D0, 3V3, GND
 //   BMP280   SDA D2, SCL D1, 3V3, GND (CSB high or open: I2C mode)
 // Slot 1 (D3) is declared with nothing on it: the scan reports it empty.
-// D0 (GPIO16) is the RC522's IRQ input: the receive wait of each poll is the IRQ line instead of reads of ComIrqReg. The
-// ESP8266 has no interrupt on GPIO16, so the line is sampled in transceive()'s wait; the RC522 drives it (push-pull, active
-// low), then ComIrqReg tells RxIRq from TimerIRq. Not on a boot strapping pin (D3, D4, D8) because the RC522 keeps its state
-// across a reset of the board and a pending request would hold the line low at the next boot.
+// D0 (GPIO16) is the RC522's IRQ input. A poll starts its command and returns; the loop finishes it (Rfid::service) when the
+// line is asserted, or after 40 ms, so nothing in the loop waits for the reader. The ESP8266 has no interrupt on GPIO16, so the
+// line is sampled (irq::Sampled); where the pin has one, irq::IsrFlag sets a flag in the ISR instead. The chip drives the line
+// (push-pull, active low); ComIrqReg then tells RxIRq (a card answered) from TimerIRq (none did), and a line that disagrees with
+// the register is a device failure. Not on a boot strapping pin (D3, D4, D8): the RC522 keeps its state across a reset of the
+// board and a pending request would hold the line low at the next boot.
 //
 // Line format: <ms> <name>[<row>]=<value>   a card's UID in hex when one arrives, 0 when it leaves (after 3 polls
 // without it, or when the reader stops answering). miss[1]=<n>: polls in a row that found no card while one is held.
@@ -20,7 +22,8 @@
 // row: one that keeps flapping is quarantined (not polled) for a growing time. Faults, from the serial monitor:
 //   v   RST low for 3 s: the reader vanishes
 //   p   RST low for 1 ms: a silent reset, the reader still answers and has lost its configuration
-//   IRQ <ms> rx=R tmo=T spurious=S missed=M none=N low@arm=L 0x<ComIrqReg>:<count> ...   every 5 s, the IRQ line against ComIrqReg
+//   IRQ <ms> rx=R tmo=T spurious=S missed=M none=N 0x<ComIrqReg>:<count> ...   every 5 s, the IRQ line against ComIrqReg
+//   LOOP <ms> n=<iterations> max=<us> pump=<us> svc=<us>   every 5 s, the loop's iterations and the longest iteration, pump() and service()
 #include <Arduino.h>
 #undef bit   // Arduino's bit(b) macro; fail:: has its own bit(Kind)
 #include <chips/esp8266/esp8266Twi.h>
@@ -33,6 +36,7 @@
 #include <oneMachine/fail/world.h>
 #include <oneMachine/fail/health.h>
 #include "rc522.h"
+#include "irq_esp8266.h"
 #include "bmp280.h"
 
 #ifndef BUILD_REV
@@ -68,26 +72,15 @@ struct Printer {
   };
 };
 
-// The RC522 IRQ line, sampled. Active low (IRqInv=1), RxIRq and TimerIRq enabled while a command runs. The counters tell the
-// line from ComIrqReg: rx/tmo: the line fell and the register agrees (a card answered / the timer ran out); spurious: it fell
-// but the register shows neither; missed: the register shows one but the line never fell; none: neither.
-struct IrqFlag {
-  static constexpr bool on = true;
-  static constexpr uint8_t enable = 0x80 | 0x20 | 0x01;   // IRqInv, RxIEn, TimerIEn: while a command runs
-  static constexpr uint8_t idle = 0x80;                   // IRqInv only: the line stays high between polls
-  static constexpr uint8_t pushPull = 0x80;               // DivIEnReg IRQPushPull: D0 has no pull-up
-  static constexpr uint8_t irqPin = 16;                   // D0
-  static inline uint32_t rx = 0, tmo = 0, spurious = 0, missed = 0, none = 0, low0 = 0;
-  static inline uint8_t vals[8] = {}; static inline uint32_t cnt[8] = {};
-  static void arm() { if (!digitalRead(irqPin)) ++low0; }   // low here: a request left over, the line was not released
-  static bool wait() {
-    const uint32_t t = millis();
-    while (digitalRead(irqPin) && millis() - t < 40) yield();
-    return !digitalRead(irqPin);
-  }
-  static void seen(uint8_t irq, bool fired) {
+// Rig diagnostics: the IRQ line against ComIrqReg after every command. rx/tmo: the line fell and the register agrees (a card
+// answered / the timer ran out); spurious: it fell but the register shows nothing; missed: the register shows a request and the
+// line never fell; none: neither.
+struct IrqCounters {
+  inline static uint32_t rx = 0, tmo = 0, spurious = 0, missed = 0, none = 0;
+  inline static uint8_t vals[8] = {}; inline static uint32_t cnt[8] = {};
+  static void seen(uint8_t irq, bool line, const fail::Outcome&) {
     const uint8_t hit = irq & 0x21;
-    if (fired) { if (!hit) ++spurious; else if (irq & 0x20) ++rx; else ++tmo; }
+    if (line) { if (!hit) ++spurious; else if (irq & 0x20) ++rx; else ++tmo; }
     else if (hit) ++missed; else ++none;
     for (uint8_t i = 0; i < 8; ++i) {
       if (cnt[i] && vals[i] == irq) { ++cnt[i]; return; }
@@ -99,7 +92,6 @@ struct IrqFlag {
     Serial.print(F(" rx=")); Serial.print(rx); Serial.print(F(" tmo=")); Serial.print(tmo);
     Serial.print(F(" spurious=")); Serial.print(spurious); Serial.print(F(" missed=")); Serial.print(missed);
     Serial.print(F(" none=")); Serial.print(none);
-    Serial.print(F(" low@arm=")); Serial.print(low0);
     for (uint8_t i = 0; i < 8 && cnt[i]; ++i) { Serial.print(F(" 0x")); Serial.print(vals[i], HEX); Serial.print(':'); Serial.print(cnt[i]); }
     Serial.println();
   }
@@ -113,7 +105,7 @@ struct RfidMode {
   template<typename E> using DevStack = fail::Controller<E, fail::TickPart<fail::Retry<2>>, fail::Recover, fail::DetectError,
     fail::HoldOp<fail::Coalesce>, fail::Gate<50>, fail::TickPart<fail::Reprobe<500, 120>>, fail::LazyStatus>;
   template<typename Impl, typename W> using Access = fail::SpiAccess<Impl, W>;
-  using Irq = IrqFlag;
+  using Irq = rc522::Interrupt<irq::Sampled<16>, IrqCounters>;   // D0
 };
 using Rfid = rc522::Rc522<RfidApp, RfidMode, 1>;
 using RfidDrivers = discover::DriversIn<Chain<Rfid>>;
@@ -141,8 +133,8 @@ void setup() {
   delay(200);
   Serial.println(F("\nOneMachine SPI + I2C discovery"));
   Serial.println(F("build " BUILD_REV " " __DATE__ " " __TIME__));
-  pinMode(IrqFlag::irqPin, INPUT);
-  Serial.print(F("reset: ")); Serial.print(ESP.getResetReason()); Serial.print(F(", IRQ pin reads ")); Serial.println(digitalRead(IrqFlag::irqPin));
+  Rfid::Irq::begin();
+  Serial.print(F("reset: ")); Serial.print(ESP.getResetReason()); Serial.print(F(", IRQ line ")); Serial.println(Rfid::Irq::line() ? F("low") : F("high"));
   esp::OutPin<rstPin>::begin(); esp::OutPin<rstPin>::on();   // RC522 RST high; a chip select on this pin would reset it
   Twi::begin();
   Spi::begin();
@@ -169,7 +161,7 @@ void setup() {
     Serial.print(F("RC522 IRQ: ComIEnReg 0x")); Serial.print(Rfid::rd(1, rc522::ComIEnReg), HEX);
     Serial.print(F(" DivIEnReg 0x")); Serial.print(Rfid::rd(1, rc522::DivIEnReg), HEX);
     Serial.print(F(" ComIrqReg 0x")); Serial.print(Rfid::rd(1, rc522::ComIrqReg), HEX);
-    Serial.print(F(", IRQ pin reads ")); Serial.println(digitalRead(IrqFlag::irqPin));
+    Serial.print(F(", IRQ line ")); Serial.println(Rfid::Irq::line() ? F("low") : F("high"));
   }
 }
 
@@ -220,12 +212,27 @@ static void faults(uint32_t now) {
   if (vanished && int32_t(now - vanishEnd) >= 0) { esp::OutPin<rstPin>::on(); vanished = false; Serial.print(now); Serial.println(F(" fault: RST high")); }
 }
 
+// loop timing, rig diagnostics: iterations since the last report and the longest iteration, pump() and service() (microseconds)
+struct LoopStats {
+  inline static uint32_t n = 0, last = 0, maxLoop = 0, maxPump = 0, maxSvc = 0;
+  static void lap(uint32_t us) { if (last && us - last > maxLoop) maxLoop = us - last; last = us; ++n; }
+  static void note(uint32_t& m, uint32_t from) { const uint32_t d = micros() - from; if (d > m) m = d; }
+  static void report(uint32_t now) {
+    Serial.print(F("LOOP ")); Serial.print(now); Serial.print(F(" n=")); Serial.print(n); Serial.print(F(" max=")); Serial.print(maxLoop);
+    Serial.print(F(" pump=")); Serial.print(maxPump); Serial.print(F(" svc=")); Serial.println(maxSvc);
+    n = 0; maxLoop = maxPump = maxSvc = 0;
+  }
+};
+
 void loop() {
   static uint32_t nextCard = 0, nextAir = 0;
+  LoopStats::lap(micros());
   const uint32_t now = millis();
   faults(now);
+  if (RfidApp::reg.count > 1) { const uint32_t t = micros(); Rfid::service(1, now); LoopStats::note(LoopStats::maxSvc, t); }
   if (int32_t(now - nextCard) >= 0) {
-    nextCard = now + 100;  RfidApp::pump();
+    nextCard = now + 100;
+    { const uint32_t t = micros(); RfidApp::pump(); LoopStats::note(LoopStats::maxPump, t); }
     static uint8_t lastMiss = 0;   // a card held still that misses polls: the streak, printed when it grows
     const uint8_t miss = RfidApp::reg.count > 1 ? RfidApp::devState<Rfid>(1).missStreak : 0;
     if (miss != lastMiss) { lastMiss = miss; if (miss) { Serial.print(millis()); Serial.print(F(" miss[1]=")); Serial.println(miss); } }
@@ -237,5 +244,5 @@ void loop() {
   logHealth();
   if (int32_t(now - nextAir)  >= 0) { nextAir  = now + 1000; AirApp::pump(); }
   static uint32_t nextIrq = 5000;
-  if (int32_t(now - nextIrq) >= 0) { nextIrq = now + 5000; IrqFlag::report(now); }
+  if (int32_t(now - nextIrq) >= 0) { nextIrq = now + 5000; IrqCounters::report(now); LoopStats::report(now); }
 }

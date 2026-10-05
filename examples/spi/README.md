@@ -27,10 +27,12 @@ Wemos D1 mini (ESP8266), everything at 3.3V.
 
 Slot 1 is D3 (GPIO0) with nothing on it: the scan reports it empty.
 
-D0 (GPIO16) is the RC522's IRQ input (push-pull, active low, set by the driver). The receive wait of each poll is this line instead
-of reads of ComIrqReg; the ESP8266 has no interrupt on GPIO16, so it is sampled, and ComIrqReg then tells RxIRq from TimerIRq. Requests
-are enabled only while a command runs. Keep the IRQ off the boot strapping pins (D3, D4, D8): the RC522 keeps its state across a reset
-of the board, and a pending request would hold such a pin low at the next boot.
+D0 (GPIO16) is the RC522's IRQ input (push-pull, active low, set by the driver). A poll starts its command and returns; the
+loop's `Rfid::service()` finishes it when the line is asserted, or after 40 ms, so nothing in the loop waits for the reader. The
+ESP8266 has no interrupt on GPIO16, so the line is sampled (`irq::Sampled<16>`); on a pin that has one, `irq::IsrFlag<Pin>` sets a
+flag in the ISR instead. The RxIRq/TimerIRq bits tell a card from none, and a line that disagrees with the register is reported as a
+device failure. Requests are enabled only while a command runs. Keep the IRQ off the boot strapping pins (D3, D4, D8, rejected at
+compile time): the RC522 keeps its state across a reset of the board, and a pending request would hold such a pin low at the next boot.
 
 ## Build and flash
 
