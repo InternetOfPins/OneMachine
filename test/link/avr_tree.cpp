@@ -58,18 +58,15 @@ template<typename Code> static void note(int32_t v) { Queue::note(Code::num, v);
 template<typename Code> static void note(int32_t v) { g_sink = v; }
 #endif
 
-template<typename Code> struct Note { static void fn(int32_t v) { note<Code>(v); } };
+template<typename Code> struct Note { static constexpr auto fn = &note<Code>; };
 using Pubs = airTree::Pubs<M, Note>;
 
 #ifdef LINK
 struct Extra {
   using Codes = Chain<CodeCard>;
   static uint8_t status(uint8_t) { return 0; }
-  template<typename P> static constexpr void describe(P& put) {
-    airTree::cardLine(put);
-    if constexpr (!bmpm::NoStatus<P>::value) { const char* s = " status alive"; while (*s) put(*s++); }
-    put('\n');
-  }
+  template<typename P> static void describe(P& put) { const char* s = "  card -> 0/1 notify event ro value u32 status alive\n"; while (*s) put(*s++); }
+  template<typename P> static constexpr void describeStatic(P& put) { airTree::cardLine(put); }
 };
 using Ops = bmpm::TreeOps<M, Pubs, Extra, 1, 8>;
 struct UartOut { static void put(uint8_t b) { Uart::putch(b); } };

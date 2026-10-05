@@ -2,7 +2,7 @@
 // simulated device (test/link/tree_device.cpp), the AVR image (test/link/avr_tree.cpp) and the description generator (examples/spi/describe.cpp)
 // all build them from here, so the description the generator writes is the one the firmware's hash is computed from.
 //   M      the machine (bmpm::Machine<W, Criteria, Mode>)
-//   Note   Note<Code>::fn(int32_t): what a published value calls when it changes (the App's: print it, mark it for the link, ...)
+//   Note   Note<Code>::fn: a constexpr pointer to what a published value calls when it changes (the App's: print it, mark it for the link, ...)
 #pragma once
 #include <stdint.h>
 #include <hapi/hapi.h>
@@ -24,13 +24,16 @@ namespace airTree {
 
   // temp and press notify on sync; air is the control group, config and ctrl_meas its registers (silent), each by its path in the machine
   template<typename M, template<typename> class Note> using Pubs = hapi::Chain<
-    bmpm::PublishedAt<CodeTemp,     bmpm::PathRef<M, 0>,    oneData::OnSync<&Note<CodeTemp>::fn>>,
-    bmpm::PublishedAt<CodePress,    bmpm::PathRef<M, 1>,    oneData::OnSync<&Note<CodePress>::fn>>,
+    bmpm::PublishedAt<CodeTemp,     bmpm::PathRef<M, 0>,    oneData::OnSync<Note<CodeTemp>::fn>>,
+    bmpm::PublishedAt<CodePress,    bmpm::PathRef<M, 1>,    oneData::OnSync<Note<CodePress>::fn>>,
     bmpm::PublishedAt<CodeAir,      bmpm::PathRef<M, 3>>,
     bmpm::PublishedAt<CodeConfig,   bmpm::PathRef<M, 3, 0>>,
     bmpm::PublishedAt<CodeCtrlMeas, bmpm::PathRef<M, 3, 1>>>;
 
-  // the card: a code that only notifies (an event with a value, the UID, 0 when it leaves); the App adds the status of the reader's row
-  template<typename P> constexpr void cardLine(P& put) { const char* s = "  card -> 0/1 notify event ro value u32"; while (*s) put(*s++); }
-
+  // the card: a code that only notifies (an event with a value, the UID, 0 when it leaves). The App's text line is cardText then the status of the
+  // reader's row; the description's static line (its hash, the build output) is cardText without the trailing " status ".
+  // (a macro, so an App's text path uses it as a literal of its own, as before: the text build is the same image to the byte)
+  #define AIRTREE_CARD_TEXT "  card -> 0/1 notify event ro value u32 status "
+  inline constexpr char cardText[] = AIRTREE_CARD_TEXT;
+  template<typename P> constexpr void cardLine(P& put) { for (unsigned i = 0; i + 8 < sizeof cardText - 1; ++i) put(cardText[i]); put('\n'); }
 }

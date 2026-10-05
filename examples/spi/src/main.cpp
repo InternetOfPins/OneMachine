@@ -203,7 +203,7 @@ template<typename Code, uint8_t Decimals> static void say(int32_t v) {
   bmpm::ChangeQueue<8>::note(Code::num, v);   // and for the consumer that reads changes over the link
 #endif
 }
-template<typename Code> struct Say { static void fn(int32_t v) { say<Code, 2>(v); } };
+template<typename Code> struct Say { static constexpr auto fn = &say<Code, 2>; };
 using Published = airTree::Pubs<Bmp, Say>;   // temp, press, air, air/config, air/ctrl_meas (air_tree.h)
 constexpr uint8_t airBus = airTree::bus;
 
@@ -336,14 +336,13 @@ static void faultTick(uint32_t now) {
 struct Extra {   // a code that only notifies: the card (an event with a value, the UID, 0 when it leaves), with the status of the reader's row
   using Codes = Chain<CodeCard>;
   static uint8_t status(uint8_t) { return RfidApp::reg.count > 1 ? uint8_t(RfidApp::reg.status(1)) : 2; }
-  template<typename P> static constexpr void describe(P& put) {
-    airTree::cardLine(put);
-    if constexpr (!bmpm::NoStatus<P>::value) {
-      put(' '); const uint8_t st = status(0);
-      const char* s = st == 0 ? "status alive" : st == 1 ? "status stale" : "status gone"; while (*s) put(*s++);
-    }
+  template<typename P> static void describe(P& put) {
+    const char* s = AIRTREE_CARD_TEXT; while (*s) put(*s++);
+    const uint8_t st = status(0);
+    s = st == 0 ? "alive" : st == 1 ? "stale" : "gone"; while (*s) put(*s++);
     put('\n');
   }
+  template<typename P> static constexpr void describeStatic(P& put) { airTree::cardLine(put); }
 };
 using Ops = bmpm::TreeOps<Bmp, Published, Extra, airBus, 8>;
 struct SerialOut { static void put(uint8_t b) { Serial.write(b); } };

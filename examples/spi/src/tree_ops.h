@@ -1,8 +1,8 @@
 // The link's ops over the published nodes of a machine tree. The framing and the bytes are role/link.h's: this is an App with payload ops
 // (`payload = true`: role::Link calls describe() for op 'd' and request() for the others).
 //   'd'  the description, by its hash (the default): `hash <8 hex digits>\n` then one digit per code, the status of the row it is bound to now
-//        (0 alive, 1 stale, 2 gone), then `\n`. The hash is FNV-1a over the description's text without the status, computed at compile time from the
-//        same walk; the consumer has the text from the build (examples/spi/describe.cpp writes <hash>.txt; python: Tree(link, descriptions=dir)).
+//        (0 alive, 1 stale, 2 gone), then `\n`. The hash is FNV-1a over the description's text without the status, computed at compile time
+//        (bmpm::HashWalk, Extra::describeStatic); the consumer has the text from the build (examples/spi/describe.cpp writes <hash>.txt; python: Tree(link, descriptions=dir)).
 //        With -DONEMACHINE_DESC_TEXT: the text itself, bmpm::describe's walk then the codes that only notify (Extra), each line ending with the
 //        status of its row. Codes are numbered in the order they are listed.
 //   'v'  get by code           payload: the code (text)                       reply: the status (u8), then the value (i32 little-endian)
@@ -70,9 +70,8 @@ namespace bmpm {
     static constexpr bool payload = true;
     using Queue = ChangeQueue<N>;
 
-    // the description's hash: the text without the status, folded at compile time (Extra::describe must be constexpr and leave out its status for a
-    // put with noStatus)
-    static constexpr uint32_t hash() { bmpm::Fnv f; bmpm::describe<M, Pubs>(f, Bus); Extra::describe(f); return f.h; }
+    // the description's hash: its static text (bmpm::describeStatic, then Extra::describeStatic), folded at compile time
+    static constexpr uint32_t hash() { bmpm::Fnv f; bmpm::describeStatic<M, Pubs>(f, Bus); Extra::describeStatic(f); return f.h; }
     template<typename P> static void describe(P& put) {
 #ifdef ONEMACHINE_DESC_TEXT
       bmpm::describe<M, Pubs>(put, Bus); Extra::describe(put);

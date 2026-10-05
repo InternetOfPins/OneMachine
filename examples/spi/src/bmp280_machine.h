@@ -372,32 +372,15 @@ namespace bmpm {
   template<typename T, typename = void> struct IsGroup : std::false_type {};
   template<typename T> struct IsGroup<T, std::void_t<typename T::Body>> : std::true_type {};
 
-  // A put may declare `static constexpr bool folds = true` (it is evaluated at compile time: names are read with at(), not from flash) and
-  // `static constexpr bool noStatus = true` (the lines leave out the status, which is the device's now, not part of what it is).
-  template<typename P, typename = void> struct Folds : std::false_type {};
-  template<typename P> struct Folds<P, std::void_t<decltype(P::folds)>> : std::bool_constant<P::folds> {};
-  template<typename P, typename = void> struct NoStatus : std::false_type {};
-  template<typename P> struct NoStatus<P, std::void_t<decltype(P::noStatus)>> : std::bool_constant<P::noStatus> {};
-  // FNV-1a over the description's text without the status: the description's hash, at compile time (state::fnv, as the schema hash)
-  struct Fnv { static constexpr bool folds = true, noStatus = true; uint32_t h = 2166136261u; constexpr void operator()(char c) { h = state::fnv(h, uint8_t(c)); } };
-
-  inline constexpr char hexDigits[] = "0123456789ABCDEF";
   template<typename P> struct Walk {
     P& put;
-    constexpr void str(const char* s) { while (*s) put(*s++); }
-    constexpr void name(state::Name n) { if constexpr (Folds<P>::value) { for (unsigned i = 0; n.at(i); ++i) put(n.at(i)); } else state::put_name(put, n); }
-    constexpr void dec(uint32_t v) {
-      if constexpr (Folds<P>::value) { char b[10] = {}; unsigned k = 0; do { b[k++] = char('0' + v % 10); v /= 10; } while (v); while (k) put(b[--k]); }
-      else state::put_dec(put, v);
-    }
-    constexpr void hex(uint8_t v) {
-      put('0'); put('x');
-      if constexpr (Folds<P>::value) { const uint8_t hi = uint8_t(v >> 4), lo = uint8_t(v & 15); put(char(hi < 10 ? '0' + hi : 'A' + hi - 10)); put(char(lo < 10 ? '0' + lo : 'A' + lo - 10)); }
-      else { put(hexDigits[v >> 4]); put(hexDigits[v & 15]); }
-    }
+    void str(const char* s) { while (*s) put(*s++); }
+    void name(state::Name n) { state::put_name(put, n); }
+    void dec(uint32_t v) { state::put_dec(put, v); }
+    void hex(uint8_t v) { static const char d[] = "0123456789ABCDEF"; put('0'); put('x'); put(d[v >> 4]); put(d[v & 15]); }
 
     // what one node is: its fields, on the rest of the line
-    template<typename N> constexpr void fields() {
+    template<typename N> void fields() {
       if constexpr (IsGroup<N>::value) { str(" group "); dec(N::Body::size()); }
       else if constexpr (HasReg<N>::value) { str(" reg "); hex(N::regAddr); str(" default "); hex(N::regDef); str(HasSet<N>::value ? " rw" : " ro");
         if constexpr (HasLimits<N>::value) { str(" range "); dec(uint32_t(N::limLo)); str(".."); dec(uint32_t(N::limHi)); } }
@@ -405,30 +388,70 @@ namespace bmpm {
       else { str(HasSet<N>::value ? " rw" : " ro"); str(" value"); if constexpr (HasDecimals<N>::value) { str(" scaled "); dec(N::decimals); } }
     }
 
-    template<typename... N> constexpr void nodes(hapi::Chain<N...>*) { unsigned i = 0; ((str("  #"), dec(i++), put(' '), name(N::label()), fields<N>(), put('\n')), ...); }
-    template<typename... R> constexpr void regs(hapi::Chain<R...>*) { unsigned i = 0; ((str("    #"), dec(i++), put(' '), name(R::label()), fields<R>(), put('\n')), ...); }
+    template<typename... N> void nodes(hapi::Chain<N...>*) { unsigned i = 0; ((str("  #"), dec(i++), put(' '), name(N::label()), fields<N>(), put('\n')), ...); }
+    template<typename... R> void regs(hapi::Chain<R...>*) { unsigned i = 0; ((str("    #"), dec(i++), put(' '), name(R::label()), fields<R>(), put('\n')), ...); }
 
-    template<typename M> constexpr void machine() {
+    template<typename M> void machine() {
       str("machine "); name(TagBmp::name()); str(" at "); hex(M::addr); put('\n');
       nodes(static_cast<typename M::Nodes*>(nullptr));
       regs(static_cast<typename M::Ctrl::Body::Types*>(nullptr));
     }
 
-    template<typename M, typename Pub> constexpr void published(uint8_t bus) {
+    template<typename M, typename Pub> void published(uint8_t bus) {
       using Inner = typename Pub::Inner;
       str("  "); name(Pub::PubCode::name()); str(" -> "); dec(bus); put('/'); dec(M::addr);
       if constexpr (std::is_void<typename Pub::Path>::value) { put('/'); dec(unsigned(M::template IndexOf<Inner, typename M::Nodes>::value)); }
       else for (unsigned i = 0; i < Pub::Path::depth; ++i) { put('/'); dec(Pub::Path::path[i]); }
       str(NotifiesSync<Pub>::value ? " notify sync" : " silent"); fields<Inner>();
-      if constexpr (!NoStatus<P>::value) { str(" status "); str(statusName(M::status())); }
-      put('\n');
+      str(" status "); str(statusName(M::status())); put('\n');
     }
-    static constexpr const char* statusName(uint8_t st) { return st == 0 ? "alive" : st == 1 ? "stale" : "gone"; }
-    template<typename M, typename... Pub> constexpr void publishedAll(hapi::Chain<Pub...>*, uint8_t bus) { (published<M, Pub>(bus), ...); }
+    static const char* statusName(uint8_t st) { return st == 0 ? "alive" : st == 1 ? "stale" : "gone"; }
+    template<typename M, typename... Pub> void publishedAll(hapi::Chain<Pub...>*, uint8_t bus) { (published<M, Pub>(bus), ...); }
   };
 
+  // ---- the description's hash: the same lines as Walk, without the status, by a walk of its own that folds at compile time -------------------
+  // Walk is the text the device sends (-DONEMACHINE_DESC_TEXT, and the log); HashWalk is what the hash is folded from and what the build output
+  // holds (examples/spi/describe.cpp prints it). They are two walks so the text build stays what it was; describe.cpp refuses to write a file whose
+  // text does not hash to the fold, and test/link/check_tree.py checks the text build's description against that file, so they cannot drift apart.
+  struct Fnv { uint32_t h = 2166136261u; constexpr void operator()(char c) { h = state::fnv(h, uint8_t(c)); } };
+  template<typename P> struct HashWalk {
+    P& put;
+    constexpr void str(const char* s) { while (*s) put(*s++); }
+    constexpr void name(state::Name n) { for (unsigned i = 0; n.at(i); ++i) put(n.at(i)); }
+    constexpr void dec(uint32_t v) { char b[10] = {}; unsigned k = 0; do { b[k++] = char('0' + v % 10); v /= 10; } while (v); while (k) put(b[--k]); }
+    constexpr void hex(uint8_t v) { const uint8_t hi = uint8_t(v >> 4), lo = uint8_t(v & 15); put('0'); put('x'); put(char(hi < 10 ? '0' + hi : 'A' + hi - 10)); put(char(lo < 10 ? '0' + lo : 'A' + lo - 10)); }
+    template<typename N> constexpr void fields() {
+      if constexpr (IsGroup<N>::value) { str(" group "); dec(N::Body::size()); }
+      else if constexpr (HasReg<N>::value) { str(" reg "); hex(N::regAddr); str(" default "); hex(N::regDef); str(HasSet<N>::value ? " rw" : " ro");
+        if constexpr (HasLimits<N>::value) { str(" range "); dec(uint32_t(N::limLo)); str(".."); dec(uint32_t(N::limHi)); } }
+      else if constexpr (HasConst<N>::value) { str(" const "); hex(N::constAddr); str(" ["); dec(N::constLen); put(']'); }
+      else { str(HasSet<N>::value ? " rw" : " ro"); str(" value"); if constexpr (HasDecimals<N>::value) { str(" scaled "); dec(N::decimals); } }
+    }
+    template<typename... N> constexpr void nodes(hapi::Chain<N...>*) { unsigned i = 0; ((str("  #"), dec(i++), put(' '), name(N::label()), fields<N>(), put('\n')), ...); }
+    template<typename... R> constexpr void regs(hapi::Chain<R...>*) { unsigned i = 0; ((str("    #"), dec(i++), put(' '), name(R::label()), fields<R>(), put('\n')), ...); }
+    template<typename M> constexpr void machine() {
+      str("machine "); name(TagBmp::name()); str(" at "); hex(M::addr); put('\n');
+      nodes(static_cast<typename M::Nodes*>(nullptr));
+      regs(static_cast<typename M::Ctrl::Body::Types*>(nullptr));
+    }
+    template<typename M, typename Pub> constexpr void published(uint8_t bus) {
+      using Inner = typename Pub::Inner;
+      str("  "); name(Pub::PubCode::name()); str(" -> "); dec(bus); put('/'); dec(M::addr);
+      if constexpr (std::is_void<typename Pub::Path>::value) { put('/'); dec(unsigned(M::template IndexOf<Inner, typename M::Nodes>::value)); }
+      else for (unsigned i = 0; i < Pub::Path::depth; ++i) { put('/'); dec(Pub::Path::path[i]); }
+      str(NotifiesSync<Pub>::value ? " notify sync" : " silent"); fields<Inner>(); put('\n');
+    }
+    template<typename M, typename... Pub> constexpr void publishedAll(hapi::Chain<Pub...>*, uint8_t bus) { (published<M, Pub>(bus), ...); }
+  };
+  template<typename M, typename Pubs, typename P> constexpr void describeStatic(P& put, uint8_t bus) {
+    HashWalk<P> w{put};
+    w.template machine<M>();
+    w.str("published\n");
+    w.template publishedAll<M>(static_cast<Pubs*>(nullptr), bus);
+  }
+
   // M: the machine (its Criteria is the device's identity in the path); Pubs: Chain<published nodes>; bus: the machine's position in the App
-  template<typename M, typename Pubs, typename P> constexpr void describe(P& put, uint8_t bus) {
+  template<typename M, typename Pubs, typename P> void describe(P& put, uint8_t bus) {
     Walk<P> w{put};
     w.template machine<M>();
     w.str("published\n");

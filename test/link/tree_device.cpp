@@ -49,18 +49,19 @@ using airTree::CodeCard;   // the codes and the published nodes: examples/spi/sr
 using Queue = bmpm::ChangeQueue<8>;
 template<typename Code> static void note(int32_t v) { Queue::note(Code::num, v); }
 
-template<typename Code> struct Note { static void fn(int32_t v) { note<Code>(v); } };
+template<typename Code> struct Note { static constexpr auto fn = &note<Code>; };
 using Pubs = airTree::Pubs<M, Note>;
 
 struct Extra {   // a code that only notifies: the card (an event with a value, the UID, 0 when it leaves), with the status of its row
   using Codes = Chain<CodeCard>;
   static inline uint8_t cardStatus = 0;
   static uint8_t status(uint8_t) { return cardStatus; }
-  template<typename P> static constexpr void describe(P& put) {
-    airTree::cardLine(put);
-    if constexpr (!bmpm::NoStatus<P>::value) { const char* s = cardStatus == 0 ? " status alive" : cardStatus == 1 ? " status stale" : " status gone"; while (*s) put(*s++); }
+  template<typename P> static void describe(P& put) {
+    const char* s = AIRTREE_CARD_TEXT; while (*s) put(*s++);
+    s = cardStatus == 0 ? "alive" : cardStatus == 1 ? "stale" : "gone"; while (*s) put(*s++);
     put('\n');
   }
+  template<typename P> static constexpr void describeStatic(P& put) { airTree::cardLine(put); }
 };
 using Ops = bmpm::TreeOps<M, Pubs, Extra, 1, 8>;
 
