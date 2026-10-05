@@ -35,6 +35,14 @@ namespace mspi {
       for (auto& r : regs) r = 0;
       regs[0x37] = version; regs[0x14] = 0x80; n = 0; resetReads = 0; deaf = 0; pending = 0; held = false;
     }
+    bool stall = false;   // a command never ends: no request is raised
+    uint8_t lineFault = 0; // the IRQ line: 0 as the chip drives it, 1 stuck high (not connected), 2 stuck low
+    // the IRQ line, active low (ComIEnReg IRqInv set): asserted while a request that is enabled is pending
+    bool line() const {
+      if (lineFault == 1) return false;
+      if (lineFault == 2) return true;
+      return !held && (regs[0x04] & regs[0x02] & 0x7F) != 0;
+    }
     bool noStore = false; // the ID answers and nothing written is kept (a part living off its signal pins)
     bool held = false;    // RST low: the part reads 0x00 and ignores writes; released, it comes up at its register defaults (a hard reset, not a SoftReset)
     void hold(bool on) {
@@ -77,6 +85,7 @@ namespace mspi {
     void transceive(Card& card) {
       const uint8_t len = n; uint8_t in[16]; for (uint8_t i = 0; i < len; ++i) in[i] = fifo[i];
       n = 0; regs[0x06] = 0;
+      if (stall) return;
       const bool antenna = (regs[0x14] & 0x03) == 0x03;
       if (antenna && card.present && len == 1 && (in[0] == 0x52 || in[0] == 0x26)) {
         if (card.mute) { --card.mute; regs[0x04] |= 0x01; return; }   // a held card that does not answer this wake-up
@@ -117,7 +126,7 @@ namespace mspi {
     static void reset() {
       for (uint8_t k = 0; k < slots; ++k) { kind[k] = Kind::Empty; bytes[k] = 0; modeAt[k] = 0xFF; }
       bmxId = 0x58; idle = 0xFF; floating = stuckLow = false; noise = 0;
-      rc.reset(0x92); card = Card{};
+      rc.reset(0x92); rc.stall = false; rc.lineFault = 0; card = Card{};
       sel = -1; phase = 0; setups = 0; hz = 0; mode = 0;
     }
     static void clearCounts() { for (auto& b : bytes) b = 0; setups = 0; }
