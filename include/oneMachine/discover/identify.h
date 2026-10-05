@@ -239,6 +239,8 @@ namespace discover {
       for (uint8_t a = 0x08; a <= 0x77; ++a)
         if (!Self::claimedUpstream(bus, a)) Ident::template Pass<false, Drivers>::at(a, bus);
     }
+    // the declared address of a row that went Gone, looked at again by the same entries
+    template<typename Self, typename Drivers> static void revive(RowId bus, uint8_t addr) { Identify<Self>::template Pass<false, Drivers>::at(addr, bus); }
   };
 
 }

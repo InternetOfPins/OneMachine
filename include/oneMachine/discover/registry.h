@@ -64,6 +64,15 @@ namespace discover {
 
     void reset() { count = 0; overflow = 0; add(0, nullptr, noRow, true); }
 
+    // a device row: the Gone row of the same address on the same bus is taken again (a part that came back), else a new one
+    RowId addReusing(BusIdT busId, IDriver* drv, RowId parent) {
+      for (RowId r = 0; r < count; ++r) {
+        Row& g = rows[r];
+        if (!g.isBus && g.parent == parent && g.busId == busId && g.st_ == uint8_t(Status::Gone)) { g.drv = drv; g.st_ = uint8_t(Status::Alive); return r; }
+      }
+      return add(busId, drv, parent, false);
+    }
+
     RowId add(BusIdT busId, IDriver* drv, RowId parent, bool isBus) {
       if (count >= N) { ++overflow; return noRow; }
       Row& r = rows[count];
@@ -98,6 +107,10 @@ namespace discover {
   // `static constexpr bool lifecycle = true;` and the hooks `release(row)` and `unbindAll()`
   template<typename S, typename = void> struct LifecycleOf : std::false_type {};
   template<typename S> struct LifecycleOf<S, std::void_t<decltype(S::lifecycle)>> : std::bool_constant<S::lifecycle> {};
+
+  // an app opts in to reviving Gone rows with `static constexpr bool revive = true;` (and a Scan that has revive(bus, busId)): World::reviveGone()
+  template<typename S, typename = void> struct ReviveOf : std::false_type {};
+  template<typename S> struct ReviveOf<S, std::void_t<decltype(S::revive)>> : std::bool_constant<S::revive> {};
 
   // Self is the concrete application type (CRTP): drivers name it before it is complete.
   template<typename Self, typename TwiT, typename Consumers, typename Drivers, uint8_t N, typename Scan, typename Buses>
@@ -167,6 +180,22 @@ namespace discover {
     // bridges first, each cleared as it is found, so a stale selection cannot show devices behind it
     // as if they sat on this bus; then everything else -- Scan's own concern, the registry only routes first
     static void scan(RowId bus) { route(bus); Scan::template run<Self, Drivers>(bus); }
+
+    // an app that revives rows takes the Gone row of a part that came back again (found() reads this)
+    static constexpr bool reviveRows = ReviveOf<Self>::value;
+
+    // Gone is final until the next discovery; this is a small one: each Gone device row's declared address is checked again, by the same entries
+    // (presence and identity), and a part that answers takes its row again (driver init, consumers bound). Call it slowly.
+    static void reviveGone() {
+      static_assert(ReviveOf<Self>::value, "reviveGone needs `static constexpr bool revive = true;` in the app");
+      for (RowId r = 0; r < reg.count; ++r) {
+        const auto& row = reg.rows[r];
+        if (row.isBus || row.status() != Status::Gone) continue;
+        const RowId bus = row.parent; const BusIdT id = row.busId;
+        route(bus);
+        Scan::template revive<Self, Drivers>(bus, id);
+      }
+    }
 
     // breadth-first: rows appended while scanning are visited by the same loop
     static void discover() {

@@ -27,6 +27,9 @@ Wemos D1 mini (ESP8266), everything at 3.3V.
 
 Slot 1 is D3 (GPIO0) with nothing on it: the scan reports it empty.
 
+D8 (GPIO15) must be low when the board resets. An RC522 module can hold its SDA line high at that moment, and the ESP8266 then
+boots from SDIO ("boot mode:(7,x)", "waiting for host") and runs nothing. Put a 10k resistor in series in the D8 to SDA wire.
+
 D0 (GPIO16) is the RC522's IRQ input (push-pull, active low, set by the driver). A poll starts its command and returns; the
 loop's `fail::Services` step finishes it when the line is asserted, or after 40 ms, so nothing in the loop waits for the reader. The
 ESP8266 has no interrupt on GPIO16, so the line is sampled (`irq::Sampled<16>`); on a pin that has one, `irq::IsrFlag<Pin>` sets a
@@ -115,6 +118,9 @@ first three bytes (cascade level 1 only).
   answering goes Stale, is probed, and is initialised again when it answers; one that was reset without the sketch
   knowing (its configuration read back is gone) is initialised again at once. `test/discover/spi_fail.cpp` runs both
   against the register model with RST driven. `HealthT` is not composed here.
+- A part that goes Gone (retries and probes spent) is looked for again every 5 s at its declared address, by the same entries
+  (`World::reviveGone()`, enabled by `revive = true` in the app): when it answers it takes its row again, its init runs, and the
+  value it was wanted to hold is written back. `test/discover/revive.cpp` runs it on the mock bus.
 - The BMP280 on I2C has no failure edge: a supply disturbance that resets it leaves it in sleep mode, silent.
 
 ## Faults

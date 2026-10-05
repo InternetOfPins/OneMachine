@@ -18,6 +18,7 @@ PROGRAMS=(
   discover/round2:-DR2_NO_MQTT
   discover/round3
   discover/round3b
+  discover/revive
   discover/spi1
   discover/spi_fail
   discover/spi_health

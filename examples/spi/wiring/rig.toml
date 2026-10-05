@@ -19,7 +19,7 @@ empty_cs = ["D3"]                # a chip select declared with nothing on it: th
 [parts.rfid]
 driver = "rc522"
 bus = "spi"
-cs = "D8"
+cs = "D8"                        # GPIO15, low at reset: the RC522 can hold SDA high and the board boots in SDIO mode, so a 10k in series in this wire
 rst = "D4"                       # held high by the sketch; low resets the reader
 irq = { pin = "D0", mode = "push-pull", delivery = "sampled" }
 

@@ -152,7 +152,7 @@ using RfidConsumers = Chain<Printer>;
 struct RfidApp : discover::World<RfidApp, Spi, RfidConsumers, Chain<Rfid>, 3, discover::SpiScan,
                                  Chain<discover::SpiSlotIds<Spi::slots>>>,
                  fail::DeviceOwnStale<RfidApp, RfidDrivers> {
-  static constexpr bool lifecycle = true;
+  static constexpr bool lifecycle = true, revive = true;
   static void release(RowId) {}
   static void unbindAll() {}
   using Health = fail::HealthT<RfidApp, RfidDrivers, 3, rc522::HealthCfg>;
@@ -187,7 +187,7 @@ struct AirApp;
 using Bmp = airTree::Machine<AirApp, AirMode>;   // the sensor at 0x76: its Criteria
 using AirDrivers = Chain<Bmp::Driver>;
 struct AirApp : discover::World<AirApp, Twi, Chain<>, Bmp::Entries, 3, discover::I2cScan>, fail::BusEdge<AirApp, AirDrivers, 1, AirMode> {
-  static constexpr bool lifecycle = true;
+  static constexpr bool lifecycle = true, revive = true;
   static void release(RowId) {}
   static void unbindAll() {}
   static void busReset() { Twi::begin(); }
@@ -416,6 +416,8 @@ void loop() {
   logAir();
   logHealth();
   if (int32_t(now - nextAir)  >= 0) { nextAir  = now + 1000; AirApp::pump(); bmpm::PublishAll<Published>::sync(); }
+  static uint32_t nextRevive = 5000;   // a part that went Gone is looked for again, at its declared address, every 5 s
+  if (int32_t(now - nextRevive) >= 0) { nextRevive = now + 5000; RfidApp::reviveGone(); AirApp::reviveGone(); }
   static uint32_t nextIrq = 5000;
   if (int32_t(now - nextIrq) >= 0) { nextIrq = now + 5000; IrqCounters::report(now); LoopStats::report(now); }
 }
