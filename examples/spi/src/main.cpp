@@ -209,7 +209,7 @@ template<typename Code, uint8_t Decimals> static void say(int32_t v) {
   Log.println(frac);
 #endif
 #ifdef ONEMACHINE_LINK
-  bmpm::ChangeQueue<8>::note(Code::num, v);   // and for the consumer that reads changes over the link
+  bmpm::StateChanges<>::mark(Code::num);   // and for the consumer that reads changes over the link: a pending bit, the value is read when it asks
 #endif
 }
 template<typename Code> struct Say { static constexpr auto fn = &say<Code, 2>; };

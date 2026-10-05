@@ -141,5 +141,32 @@ check(len(ch) == 8 and [x.value for x in ch] == list(range(1, 9)), 'the oldest 8
 check(m.missed - before == 4, 'and the 4 refused are counted: %d' % (m.missed - before))
 check(m.changes() == [] and m.missed - before == 4, 'the count is told once')
 
+# ---- a burst of state changes: one record per code, with the latest value; events in the same burst are still queued and counted -------
+m.changes(); before = m.missed
+for i in range(100):
+    op('S', struct.pack('<II', 415148, 519888 + 16 * (i + 1))); advance(100)             # a new temperature at every poll
+    if i % 8 == 0: op('k', struct.pack('<I', 0x100 + i))                               # 13 cards in the same burst
+latest = m.raw('temp')
+ch = m.changes()
+temps = [x for x in ch if x.code == 'temp']
+check(len(temps) == 1 and temps[0].raw == latest, '100 temp changes: one record, the latest value %r: %r' % (latest, temps))
+check([x.code for x in ch if x.code != 'card'] == ['temp', 'press'], 'state: temp and press once each: %r' % [x.code for x in ch])
+cards = [x.value for x in ch if x.code == 'card']
+check(cards == [0x100 + 8 * k for k in range(8)] and m.missed - before == 5, 'events: the oldest 8 cards kept, the 5 refused counted: %r, %d' % (cards, m.missed - before))
+check(m.changes() == [], 'nothing since')
+
+# ---- a lost reply: the consumer asks with an older sequence number, and the device sends every code ------------------------------------
+seq0 = m._seq
+op('S', struct.pack('<II', 415148, 519888)); advance(200)
+st, data = op('n', struct.pack('<H', seq0))                                              # a reply the consumer never sees
+check(st == 0 and len(data) > 4, 'an answer that is lost')
+r0 = m.resyncs
+ch = m.changes()                                                                         # still asks since seq0: the device answered since
+check(m.resyncs == r0 + 1, 'the device saw the lost reply: resync')
+check(sorted({x.code for x in ch if x.status is None}) == ['air/config', 'air/ctrl_meas', 'press', 'temp']
+      and {x.code: x.raw for x in ch if x.status is None}['temp'] == m.raw('temp'), 'every code with a value, as it is now: %r' % ch)
+check(sorted(x.code for x in ch if x.status == 'alive') == ['air', 'air/config', 'air/ctrl_meas', 'card', 'press', 'temp'], 'and every row\'s status')
+check(m.changes() == [] and m.resyncs == r0 + 1, 'then in step again')
+
 print('FAILED: %d' % failures if failures else 'OK: python Tree over %s, description %s' % ('ctypes' if CTYPES else 'a pipe', 'by hash' if HASHED else 'as text'))
 sys.exit(1 if failures else 0)

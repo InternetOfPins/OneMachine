@@ -47,7 +47,7 @@ using Ticker = fail::Ticks<App, Drivers>;
 using airTree::CodeCard;   // the codes and the published nodes: examples/spi/src/air_tree.h
 
 using Queue = bmpm::ChangeQueue<8>;
-template<typename Code> static void note(int32_t v) { Queue::note(Code::num, v); }
+template<typename Code> static void note(int32_t) { bmpm::StateChanges<>::mark(Code::num); }   // a state code: a pending bit
 
 template<typename Code> struct Note { static constexpr auto fn = &note<Code>; };
 using Pubs = airTree::Pubs<M, Note>;
