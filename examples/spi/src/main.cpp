@@ -47,6 +47,7 @@
   #include "tree_ops.h"   // the link's ops over the published nodes (role/link.h with payload ops)
 #endif
 #include "bmp280_machine.h"
+#include "air_tree.h"   // the codes and the published nodes (shared with the description generator, ../describe.cpp)
 
 #ifndef BUILD_REV
   #define BUILD_REV "unknown"   // set by ../version.py: each repo's git commit
@@ -70,13 +71,7 @@ using Twi = esp::Esp8266TwiMaster<4, 5, 100000>;                                
 using Spi = hapi::APIOf<oneBus::SpiAPI, oneBus::SpiSlots<esp::OutPin<15>, esp::OutPin<0>>,   // slot 0 D8, slot 1 D3
                         oneBus::SpiMaster<4000000>, esp::Esp8266SpiCore>;
 
-// The codes the App publishes (the numbers are the codes' positions in the description: the link's change records use them)
-struct CodeTemp     { static constexpr uint8_t num = 0; ONEMACHINE_STATE_NAME(name, "temp"); };
-struct CodePress    { static constexpr uint8_t num = 1; ONEMACHINE_STATE_NAME(name, "press"); };
-struct CodeAir      { static constexpr uint8_t num = 2; ONEMACHINE_STATE_NAME(name, "air"); };
-struct CodeConfig   { static constexpr uint8_t num = 3; ONEMACHINE_STATE_NAME(name, "air/config"); };
-struct CodeCtrlMeas { static constexpr uint8_t num = 4; ONEMACHINE_STATE_NAME(name, "air/ctrl_meas"); };
-struct CodeCard     { static constexpr uint8_t num = 5; ONEMACHINE_STATE_NAME(name, "card"); };
+using airTree::CodeTemp; using airTree::CodePress; using airTree::CodeCard;   // the codes the App publishes: air_tree.h
 
 #ifdef ONEMACHINE_LINK
 // the card, as a change the link can read: its UID when it arrives, 0 when it leaves
@@ -182,7 +177,7 @@ struct AirMode {
     fail::HoldOp<fail::Coalesce>, fail::Gate<50>, fail::TickPart<fail::Reprobe<500, 120>>, fail::LazyStatus>;
 };
 struct AirApp;
-using Bmp = bmpm::Machine<AirApp, bmpm::Addr<0x76>, AirMode>;   // the sensor at 0x76: its Criteria
+using Bmp = airTree::Machine<AirApp, AirMode>;   // the sensor at 0x76: its Criteria
 using AirDrivers = Chain<Bmp::Driver>;
 struct AirApp : discover::World<AirApp, Twi, Chain<>, Bmp::Entries, 3, discover::I2cScan>, fail::BusEdge<AirApp, AirDrivers, 1, AirMode> {
   static constexpr bool lifecycle = true;
@@ -208,13 +203,9 @@ template<typename Code, uint8_t Decimals> static void say(int32_t v) {
   bmpm::ChangeQueue<8>::note(Code::num, v);   // and for the consumer that reads changes over the link
 #endif
 }
-using PubTemp  = bmpm::PublishedAt<CodeTemp,  bmpm::PathRef<Bmp, 0>, oneData::OnSync<&say<CodeTemp, 2>>>;
-using PubPress = bmpm::PublishedAt<CodePress, bmpm::PathRef<Bmp, 1>, oneData::OnSync<&say<CodePress, 2>>>;
-using PubAir   = bmpm::PublishedAt<CodeAir,   bmpm::PathRef<Bmp, 3>>;
-using PubConfig   = bmpm::PublishedAt<CodeConfig,   bmpm::PathRef<Bmp, 3, 0>>;   // the leaves of the group, by their paths
-using PubCtrlMeas = bmpm::PublishedAt<CodeCtrlMeas, bmpm::PathRef<Bmp, 3, 1>>;
-using Published = Chain<PubTemp, PubPress, PubAir, PubConfig, PubCtrlMeas>;
-constexpr uint8_t airBus = 1;   // the air sensor's bus is the App's second machine: its path codes start with 1
+template<typename Code> struct Say { static void fn(int32_t v) { say<Code, 2>(v); } };
+using Published = airTree::Pubs<Bmp, Say>;   // temp, press, air, air/config, air/ctrl_meas (air_tree.h)
+constexpr uint8_t airBus = airTree::bus;
 
 struct SerialPut { void operator()(char c) { Log.write(c); } };
 
@@ -345,10 +336,12 @@ static void faultTick(uint32_t now) {
 struct Extra {   // a code that only notifies: the card (an event with a value, the UID, 0 when it leaves), with the status of the reader's row
   using Codes = Chain<CodeCard>;
   static uint8_t status(uint8_t) { return RfidApp::reg.count > 1 ? uint8_t(RfidApp::reg.status(1)) : 2; }
-  template<typename P> static void describe(P& put) {
-    const char* s = "  card -> 0/1 notify event ro value u32 status "; while (*s) put(*s++);
-    const uint8_t st = status(0);
-    s = st == 0 ? "alive" : st == 1 ? "stale" : "gone"; while (*s) put(*s++);
+  template<typename P> static constexpr void describe(P& put) {
+    airTree::cardLine(put);
+    if constexpr (!bmpm::NoStatus<P>::value) {
+      put(' '); const uint8_t st = status(0);
+      const char* s = st == 0 ? "status alive" : st == 1 ? "status stale" : "status gone"; while (*s) put(*s++);
+    }
     put('\n');
   }
 };

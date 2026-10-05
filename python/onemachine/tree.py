@@ -10,13 +10,16 @@
     m.reading('temp')                                      # Reading(value=27.61, status='stale'): never raises; m.temp raises Stale when the part is not alive
     m.missed                                               # how many notifications the device had to refuse (its queue was full) since the start
 
+A device may describe itself by hash only (the default of examples/spi): `d` answers the hash and each code's status, and the text is read from the
+build output, `Tree(link, descriptions=dir)`, where examples/spi/describe.cpp wrote <hash>.txt from the same types (a device built with
+-DONEMACHINE_DESC_TEXT sends the text itself).
 A code is a name, with `/` for the part of a group (`air/ctrl_meas` is `m.air.ctrl_meas`). The description lists, per code: its path in the
 machine (`<bus>/<address>/<node>[/<child>]`, for people), whether it notifies (`sync`: a value that moves; `event`), read-only or read-write, its
 kind (a value, a register with its default, a group) and, for a value, how many decimals it is scaled by and the range a set accepts.
 A part that is not alive is Stale or Gone: reading one of its codes raises Stale (it carries the last value), and the change is announced by changes()
 as one status change per code of that part (the device sends it once, through the first of them).
 A device that refused notifications (`missed`) says how many; the values a consumer follows are read again with get()."""
-import struct
+import os, struct
 from collections import namedtuple
 from .machine import LinkError
 
@@ -44,6 +47,10 @@ class Code:
         if self.unit == 'u32': return raw & 0xFFFFFFFF
         return raw / 10 ** self.scaled if self.scaled else raw
     def to_raw(self, value): return int(round(value * 10 ** self.scaled)) if self.scaled else int(value)
+
+def _fnv(data, h=2166136261):
+    for b in data: h = ((h ^ b) * 16777619) & 0xFFFFFFFF
+    return h
 
 def _parse(text):
     """The `published` section: one line per code, in the order the device numbers them."""
@@ -80,8 +87,9 @@ class Group:
     def __dir__(self): return [c.name[len(self._p) + 1:] for c in self._t._codes if c.name.startswith(self._p + '/')]
 
 class Tree:
-    def __init__(self, link):
+    def __init__(self, link, descriptions=None):
         object.__setattr__(self, 'link', link)
+        object.__setattr__(self, 'descriptions', [descriptions] if isinstance(descriptions, str) else list(descriptions or []))
         object.__setattr__(self, 'missed', 0)
         self.refresh()
 
@@ -93,11 +101,31 @@ class Tree:
         st, data = self._call('d')
         if st != OK: raise LinkError('description: status %d' % st)
         text = data.decode()
+        statuses = None
+        if text.startswith('hash '):                                          # the description by its hash: the text is in the build output
+            head, digits = text.split('\n')[:2]
+            h = int(head[5:], 16)
+            text = self._load(h)
+            statuses = [STATUS[int(d)] if int(d) < len(STATUS) else 'gone' for d in digits]
         codes = _parse(text)
+        if statuses is not None:
+            if len(statuses) != len(codes): raise LinkError('description %08x: %d codes, the device has %d' % (h, len(codes), len(statuses)))
+            for c, st in zip(codes, statuses): c.status = st
         object.__setattr__(self, 'description', text)
         object.__setattr__(self, '_codes', codes)
         object.__setattr__(self, 'codes', {c.name: c for c in codes})
         object.__setattr__(self, '_status', {c.src: c.status for c in codes})      # by row: what the description said, then what the device tells
+
+    def _load(self, h):
+        """The text of the description whose hash is h, from the build output (examples/spi/describe.cpp writes <hash>.txt)."""
+        name = '%08x.txt' % h
+        for d in self.descriptions:
+            p = os.path.join(d, name)
+            if os.path.isfile(p):
+                text = open(p).read()
+                if _fnv(text.encode()) != h: raise LinkError('%s: its text does not hash to %08x' % (p, h))
+                return text
+        raise LinkError('the device describes itself by hash %08x: no %s in %s (give Tree(link, descriptions=<the build\'s description dir>), or build the device with -DONEMACHINE_DESC_TEXT)' % (h, name, self.descriptions or 'no directory'))
 
     def _read(self, code):
         """(status, raw) from the device: raw is None for a group or an event. The status is the part's; a part that is not alive answers its last value."""
@@ -181,9 +209,9 @@ class Tree:
         raise UnknownCode('no code %r (the device has %s)' % (name, ', '.join(self.codes)))
 
     def __getattr__(self, name):                       # m.temp, m.air
-        if name.startswith('_') or name in ('codes', 'description', 'link', 'missed'): raise AttributeError(name)
+        if name.startswith('_') or name in ('codes', 'description', 'descriptions', 'link', 'missed'): raise AttributeError(name)
         return self._access(name)
     def __setattr__(self, name, value):
-        if name.startswith('_') or name in ('link', 'missed'): object.__setattr__(self, name, value)
+        if name.startswith('_') or name in ('link', 'missed', 'descriptions'): object.__setattr__(self, name, value)
         else: self.set(name, value)
     def __dir__(self): return sorted({c.name.split('/')[0] for c in self._codes})

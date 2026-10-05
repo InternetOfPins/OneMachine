@@ -4,9 +4,10 @@ a reset behind the host's back, an unplug with a set while it is gone, the notif
 import os, struct, sys
 D = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(D, '..', '..', 'python'))
-from onemachine import Tree, StreamLink, CtypesLink, OutOfRange, ReadOnly, UnknownCode, Stale, Reading, Change
+from onemachine import Tree, StreamLink, CtypesLink, OutOfRange, ReadOnly, UnknownCode, Stale, Reading, Change, LinkError
 
 CTYPES = len(sys.argv) > 1 and sys.argv[1] == 'ctypes'
+DESC = sys.argv[2] if len(sys.argv) > 2 else None        # where the build wrote the description by hash (examples/spi/describe.cpp)
 failures = 0
 def check(cond, what):
     global failures
@@ -18,7 +19,14 @@ def op(c, payload=b''):
 def advance(ms): check(op('t', struct.pack('<I', ms))[0] == 0, 'advance')
 def reg(a): return op('R', bytes([a]))[1][0]
 
-m = Tree(link)
+st, d = op('d')
+HASHED = d.startswith(b'hash ')
+if HASHED:
+    check(len(d) == 5 + 8 + 1 + 6 + 1 and d.endswith(b'000000\n'), 'd by hash: the hash and six statuses, %d bytes: %r' % (len(d), d))
+    try: Tree(link); check(False, 'a device described by hash, and no description directory')
+    except LinkError as e: check('-DONEMACHINE_DESC_TEXT' in str(e) and d[5:13].decode() in str(e), 'a readable error: %s' % e)
+m = Tree(link, descriptions=DESC)
+if HASHED: check(m.description == open(os.path.join(DESC, d[5:13].decode() + '.txt')).read(), 'the text is the build output\'s')
 check(list(m.codes) == ['temp', 'press', 'air', 'air/config', 'air/ctrl_meas', 'card'], 'the codes, in the device\'s order: %s' % list(m.codes))
 check(m.codes['temp'].scaled == 2 and m.codes['temp'].notify == 'sync' and m.codes['temp'].ro, 'temp: scaled 2, notifies, read-only')
 check(m.codes['air'].kind == 'group' and m.codes['air'].group_size == 2, 'air is a group of 2')
@@ -81,6 +89,7 @@ check(sorted(x.code for x in ch if x.status == 'stale') == ['air', 'air/config',
 check(len([x for x in ch if x.status]) == 5, 'and only once')
 check(m.status('air') == 'stale' and m.status('temp') == 'stale' and m.status('card') == 'alive', 'stale for the part, alive for the card')
 check(m.status('air', refresh=True) == 'stale', 'and the device says so')
+m.refresh(); check(m.codes['temp'].status == 'stale' and m.codes['card'].status == 'alive', 'the description read again carries the statuses now (by hash too)')
 try: m.temp; check(False, 'temp of a stale part raises')
 except Stale as e: check(e.status == 'stale' and e.last == t_before, 'Stale carries the status and the last value: %r' % e.last)
 try: m.air.ctrl_meas; check(False, 'a register of a stale part raises')
@@ -118,5 +127,5 @@ check(len(ch) == 8 and [x.value for x in ch] == list(range(1, 9)), 'the oldest 8
 check(m.missed - before == 4, 'and the 4 refused are counted: %d' % (m.missed - before))
 check(m.changes() == [] and m.missed - before == 4, 'the count is told once')
 
-print('FAILED: %d' % failures if failures else 'OK: python Tree over %s' % ('ctypes' if CTYPES else 'a pipe'))
+print('FAILED: %d' % failures if failures else 'OK: python Tree over %s, description %s' % ('ctypes' if CTYPES else 'a pipe', 'by hash' if HASHED else 'as text'))
 sys.exit(1 if failures else 0)

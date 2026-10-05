@@ -20,6 +20,7 @@
 #include <oneMachine/fail/world.h>
 #include "../support/mockBmpTwi.h"
 #include "../../examples/spi/src/tree_ops.h"
+#include "../../examples/spi/src/air_tree.h"
 
 using discover::RowId;
 using hapi::Chain;
@@ -32,7 +33,7 @@ struct Mode {
     fail::HoldOp<fail::Coalesce>, fail::Gate<50>, fail::TickPart<fail::Reprobe<500, 120>>, fail::LazyStatus>;
 };
 struct App;
-using M = bmpm::Machine<App, bmpm::Addr<0x76>, Mode>;
+using M = airTree::Machine<App, Mode>;
 using Drivers = Chain<M::Driver>;
 struct App : discover::World<App, mockbmp::Twi, Chain<>, M::Entries, 3, discover::I2cScan>, fail::BusEdge<App, Drivers, 1, Mode> {
   static constexpr bool lifecycle = true;
@@ -43,30 +44,21 @@ struct App : discover::World<App, mockbmp::Twi, Chain<>, M::Entries, 3, discover
 using Ticker = fail::Ticks<App, Drivers>;
 
 // the codes, with their numbers; `card` only notifies
-struct CodeTemp      { static constexpr uint8_t num = 0; ONEMACHINE_STATE_NAME(name, "temp"); };
-struct CodePress     { static constexpr uint8_t num = 1; ONEMACHINE_STATE_NAME(name, "press"); };
-struct CodeAir       { static constexpr uint8_t num = 2; ONEMACHINE_STATE_NAME(name, "air"); };
-struct CodeConfig    { static constexpr uint8_t num = 3; ONEMACHINE_STATE_NAME(name, "air/config"); };
-struct CodeCtrlMeas  { static constexpr uint8_t num = 4; ONEMACHINE_STATE_NAME(name, "air/ctrl_meas"); };
-struct CodeCard      { static constexpr uint8_t num = 5; ONEMACHINE_STATE_NAME(name, "card"); };
+using airTree::CodeCard;   // the codes and the published nodes: examples/spi/src/air_tree.h
 
 using Queue = bmpm::ChangeQueue<8>;
 template<typename Code> static void note(int32_t v) { Queue::note(Code::num, v); }
 
-using PubTemp     = bmpm::PublishedAt<CodeTemp,     bmpm::PathRef<M, 0>,    oneData::OnSync<&note<CodeTemp>>>;
-using PubPress    = bmpm::PublishedAt<CodePress,    bmpm::PathRef<M, 1>,    oneData::OnSync<&note<CodePress>>>;
-using PubAir      = bmpm::PublishedAt<CodeAir,      bmpm::PathRef<M, 3>>;
-using PubConfig   = bmpm::PublishedAt<CodeConfig,   bmpm::PathRef<M, 3, 0>>;
-using PubCtrlMeas = bmpm::PublishedAt<CodeCtrlMeas, bmpm::PathRef<M, 3, 1>>;
-using Pubs = Chain<PubTemp, PubPress, PubAir, PubConfig, PubCtrlMeas>;
+template<typename Code> struct Note { static void fn(int32_t v) { note<Code>(v); } };
+using Pubs = airTree::Pubs<M, Note>;
 
 struct Extra {   // a code that only notifies: the card (an event with a value, the UID, 0 when it leaves), with the status of its row
   using Codes = Chain<CodeCard>;
   static inline uint8_t cardStatus = 0;
   static uint8_t status(uint8_t) { return cardStatus; }
-  template<typename P> static void describe(P& put) {
-    const char* s = "  card -> 0/1 notify event ro value u32 status "; while (*s) put(*s++);
-    s = cardStatus == 0 ? "alive" : cardStatus == 1 ? "stale" : "gone"; while (*s) put(*s++);
+  template<typename P> static constexpr void describe(P& put) {
+    airTree::cardLine(put);
+    if constexpr (!bmpm::NoStatus<P>::value) { const char* s = cardStatus == 0 ? " status alive" : cardStatus == 1 ? " status stale" : " status gone"; while (*s) put(*s++); }
     put('\n');
   }
 };

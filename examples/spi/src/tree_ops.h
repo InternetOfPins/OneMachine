@@ -1,7 +1,10 @@
 // The link's ops over the published nodes of a machine tree. The framing and the bytes are role/link.h's: this is an App with payload ops
 // (`payload = true`: role::Link calls describe() for op 'd' and request() for the others).
-//   'd'  the description: bmpm::describe's text, then the codes that only notify (Extra). Codes are numbered in the order they are listed; each line
-//        ends with the status of the row the code is bound to (alive, stale or gone) as it is now.
+//   'd'  the description, by its hash (the default): `hash <8 hex digits>\n` then one digit per code, the status of the row it is bound to now
+//        (0 alive, 1 stale, 2 gone), then `\n`. The hash is FNV-1a over the description's text without the status, computed at compile time from the
+//        same walk; the consumer has the text from the build (examples/spi/describe.cpp writes <hash>.txt; python: Tree(link, descriptions=dir)).
+//        With -DONEMACHINE_DESC_TEXT: the text itself, bmpm::describe's walk then the codes that only notify (Extra), each line ending with the
+//        status of its row. Codes are numbered in the order they are listed.
 //   'v'  get by code           payload: the code (text)                       reply: the status (u8), then the value (i32 little-endian)
 //        The status is the device's: Alive 0, Stale 1, Gone 2. A part that is not Alive has no live value: a register answers the last value set (its
 //        capture, the intent that comes back), a sensor value the last one measured. A group or an event has no value: the status alone, with NoValue.
@@ -67,7 +70,21 @@ namespace bmpm {
     static constexpr bool payload = true;
     using Queue = ChangeQueue<N>;
 
-    template<typename P> static void describe(P& put) { bmpm::describe<M, Pubs>(put, Bus); Extra::describe(put); }
+    // the description's hash: the text without the status, folded at compile time (Extra::describe must be constexpr and leave out its status for a
+    // put with noStatus)
+    static constexpr uint32_t hash() { bmpm::Fnv f; bmpm::describe<M, Pubs>(f, Bus); Extra::describe(f); return f.h; }
+    template<typename P> static void describe(P& put) {
+#ifdef ONEMACHINE_DESC_TEXT
+      bmpm::describe<M, Pubs>(put, Bus); Extra::describe(put);
+#else
+      constexpr uint32_t descHash = hash();   // a constant: the walk is not in the image
+      put('h'); put('a'); put('s'); put('h'); put(' ');
+      for (int i = 28; i >= 0; i -= 4) { const uint8_t d = uint8_t((descHash >> i) & 15); put(char(d < 10 ? '0' + d : 'a' + d - 10)); }
+      put('\n');
+      for (uint8_t c = 0; c < numCodes; ++c) put(char('0' + status(c)));
+      put('\n');
+#endif
+    }
 
     // the code in the payload, against each code tag's name: true when it is that code
     template<typename Code> static bool named(const uint8_t* s, uint16_t n) {

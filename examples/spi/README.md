@@ -73,7 +73,7 @@ m.changes()                                            # [Change('temp', 27.61, 
 m.status('air')                                        # 'alive', 'stale' or 'gone': the part's row; m.temp raises Stale when it is not alive
 ```
 
-Ops: `d` the description (each code with the status of its row), `v` get by code (the status first, then the value; a part that is not alive answers its last value), `w` set by code (through the node: its limits, its capture, its register), `n` the changes since the last `n` (a value, or a status change of a row), `f` one
+Ops: `d` the description by its hash and each code's status (the text is in the build output: `.pio/build/<env>/description/<hash>.txt`, written by `describe.py` from the same types, `src/air_tree.h`; give it as `Tree(link, descriptions=...)`; env `d1_mini_link_text` sends the text itself), `v` get by code (the status first, then the value; a part that is not alive answers its last value), `w` set by code (through the node: its limits, its capture, its register), `n` the changes since the last `n` (a value, or a status change of a row), `f` one
 fault key (`x` resets the air sensor behind the host's back, `v` and `p` reset the RFID reader). The changes wait in a `fail::Buffer` of 8: when a consumer
 does not read for a while the newest are refused and counted, and the reply of `n` says how many it missed (`m.missed`); read the values again with
 `m.temp`. `examples/spi/rig_session.py` is a session on the real board; `test/link/build.sh` runs the same consumer against a simulated one.
