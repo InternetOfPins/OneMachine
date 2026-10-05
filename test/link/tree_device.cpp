@@ -1,15 +1,19 @@
-// The spi example's air sensor as a device a consumer reaches over the link (role/link.h with payload ops, examples/spi/src/tree_ops.h), on simulated time and a
-// simulated BMP280 (test/support/mockBmpTwi.h: the datasheet's worked example at 0x76). Built two ways, as test/role does:
+// The spi example's two machines as a device a consumer reaches over the link (role/link.h with payload ops, examples/spi/src/tree_ops.h), on simulated time:
+// the air sensor on a simulated BMP280 (test/support/mockBmpTwi.h: the datasheet's worked example at 0x76) and the RFID reader on a simulated RC522
+// (test/support/mockSpi.h, slot 0). Built two ways, as test/role does:
 //   a process   the link's bytes on stdin/stdout (check_tree.py over a pipe, as over a serial port)
 //   -DSIM_LIB   a shared library exporting onemachine_call / onemachine_cycle (check_tree.py in-process through ctypes)
 // Test-only ops (not part of the link):
 //   't' u32 ms     advance simulated time in 10 ms steps: the poll every 100 ms, the failure edges, the sync pass of the published nodes
 //   'x'            soft-reset the sensor behind the host's back          'u'  unplug it          'p'  plug it in again (reset values)
-//   'k' u32        a card arrives (the number is its UID; 0: it leaves): a code that only notifies
-//   'z' status     the status the card's row has from now on (0 alive, 1 stale, 2 gone)
-//   'R' reg        reply: the register's byte, read from the simulated chip (not through the machine)
-//   'W' reg v      write a register of the simulated chip (not through the machine)
-//   'S' u32 u32    the raw pressure and temperature the chip converts from now on
+//   'k' u32        an event is queued as the card's (the number is its UID): the queue alone, no reader
+//   'C' u32        a card is in the field of the simulated RC522 with this UID (0: it leaves); the driver reads it
+//   'H' / 'h'      RST low: the reader vanishes / released (it comes up at its register defaults)    'X'  an RST pulse: a silent reset
+//   'V' u8         the reader's VersionReg from now on (a reset behind the host's back is next: the part is another one)
+//   'Q' reg        reply: the RC522's register, read from the simulated chip (not through the machine)
+//   'R' reg        reply: the BMP280's register's byte, read from the simulated chip (not through the machine)
+//   'W' reg v      write a register of the simulated BMP280 (not through the machine)
+//   'S' u32 u32    the raw pressure and temperature the BMP280 converts from now on
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +23,7 @@
 #include <oneMachine/fail/busedge.h>
 #include <oneMachine/fail/world.h>
 #include "../support/mockBmpTwi.h"
+#include "../support/mockSpi.h"
 #include "../../examples/spi/src/tree_ops.h"
 #include "../../examples/spi/src/air_tree.h"
 
@@ -43,32 +48,51 @@ struct App : discover::World<App, mockbmp::Twi, Chain<>, M::Entries, 3, discover
 };
 using Ticker = fail::Ticks<App, Drivers>;
 
-// the codes, with their numbers; `card` only notifies
-using airTree::CodeCard;   // the codes and the published nodes: examples/spi/src/air_tree.h
-
+// the reader: its machine on the SPI bus's slot 0, found by its VersionReg
+struct RMode {
+  static constexpr bool lifecycle = true, returnPath = false, idempotent = true;
+  template<typename E> using DevStack = fail::Controller<E, fail::TickPart<fail::Retry<2>>, fail::Recover, fail::DetectError,
+    fail::HoldOp<fail::Coalesce>, fail::Gate<50>, fail::TickPart<fail::Reprobe<500, 120>>, fail::LazyStatus>;
+  template<typename Impl, typename W> using Access = fail::SpiAccess<Impl, W>;
+};
+struct RApp;
+using R = rfidTree::Machine<RApp, RMode>;
+using RDrivers = Chain<R::Driver>;
 using Queue = bmpm::ChangeQueue<8>;
+struct CardNotifier {   // the card, as a change the link can read: its UID when it arrives, 0 when it leaves
+  using Accepts = Chain<rc522::Card>;
+  template<typename Cap> struct Body {
+    template<typename T> struct Part : T {
+      using T::T;
+      void on(const discover::Sample<Cap>& s) { Queue::note(rfidTree::CodeCard::num, int32_t(s.value)); }
+    };
+  };
+};
+struct RApp : discover::World<RApp, mspi::Bus, Chain<CardNotifier>, RDrivers, 3, discover::SpiScan, Chain<discover::SpiSlotIds<4>>> {
+  static constexpr bool lifecycle = true;
+  static void release(RowId) {}
+  static void unbindAll() {}
+};
+using RTicker = fail::Ticks<RApp, RApp::DriverList>;
+
+using airTree::CodeCard;   // the codes and the published nodes: examples/spi/src/air_tree.h, rfid_tree.h
+
 template<typename Code> static void note(int32_t) { bmpm::StateChanges<>::mark(Code::num); }   // a state code: a pending bit
 
 template<typename Code> struct Note { static constexpr auto fn = &note<Code>; };
 using Pubs = airTree::Pubs<M, Note>;
 
-struct Extra {   // a code that only notifies: the card (an event with a value, the UID, 0 when it leaves), with the status of its row
-  using Codes = Chain<CodeCard>;
-  static inline uint8_t cardStatus = 0;
-  static uint8_t status(uint8_t) { return cardStatus; }
-  template<typename P> static void describe(P& put) {
-    const char* s = AIRTREE_CARD_TEXT; while (*s) put(*s++);
-    s = cardStatus == 0 ? "alive" : cardStatus == 1 ? "stale" : "gone"; while (*s) put(*s++);
-    put('\n');
-  }
-  template<typename P> static constexpr void describeStatic(P& put) { airTree::describeStatic(put); }
-};
-using Ops = bmpm::TreeOps<M, Pubs, Extra, 1, 8>;
+using Tree = airTree::Tree<M, Pubs, R, rfidTree::Pubs<R>>;
+using Ops = bmpm::TreeOps<Tree, 8>;
 
 static uint32_t now = 0;
 // The machine's nodes are objects with constructors of their own (the machine's statics are initialised in no defined order), so discovery, which
 // writes into them, runs from main or the first call, never from a static initialiser.
-static void start() { static bool started = false; if (started) return; started = true; mockbmp::State::reset(); mockbmp::State::c77.unplug(); App::discover(); }
+static void start() {
+  static bool started = false; if (started) return; started = true;
+  mockbmp::State::reset(); mockbmp::State::c77.unplug(); App::discover();
+  mspi::State::reset(); mspi::State::kind[0] = mspi::Kind::Rc522; mspi::State::card = mspi::Card{false, {0, 0, 0, 0}, false, false, false}; RApp::discover();
+}
 
 struct LinkApp {
   static constexpr bool payload = true;
@@ -81,8 +105,8 @@ struct LinkApp {
         if (n != 4) { r.status(role::LinkBadLength); return; }
         const uint32_t ms = uint32_t(in[0]) | uint32_t(in[1]) << 8 | uint32_t(in[2]) << 16 | uint32_t(in[3]) << 24;
         for (uint32_t t = 0; t < ms; t += 10, now += 10) {
-          if (now % 100 == 0) { App::pump(); bmpm::PublishAll<Pubs>::sync(); }
-          App::tickBuses(now); Ticker::run(now);
+          if (now % 100 == 0) { App::pump(); RApp::pump(); bmpm::PublishAll<Pubs>::sync(); }
+          App::tickBuses(now); Ticker::run(now); RTicker::run(now);
           Ops::watch();
         }
         r.status(role::LinkOk); return;
@@ -95,7 +119,18 @@ struct LinkApp {
         Queue::note(CodeCard::num, int32_t(uint32_t(in[0]) | uint32_t(in[1]) << 8 | uint32_t(in[2]) << 16 | uint32_t(in[3]) << 24));
         r.status(role::LinkOk); return;
       }
-      case 'z': if (n != 1) { r.status(role::LinkBadLength); return; } Extra::cardStatus = in[0]; r.status(role::LinkOk); return;
+      case 'C': {
+        if (n != 4) { r.status(role::LinkBadLength); return; }
+        const uint32_t u = uint32_t(in[0]) | uint32_t(in[1]) << 8 | uint32_t(in[2]) << 16 | uint32_t(in[3]) << 24;
+        mspi::State::card.present = u != 0;
+        for (int i = 0; i < 4; ++i) mspi::State::card.uid[i] = uint8_t(u >> (24 - 8 * i));
+        r.status(role::LinkOk); return;
+      }
+      case 'H': mspi::State::rc.hold(true); r.status(role::LinkOk); return;
+      case 'h': mspi::State::rc.hold(false); r.status(role::LinkOk); return;
+      case 'X': mspi::State::rc.hold(true); mspi::State::rc.hold(false); r.status(role::LinkOk); return;
+      case 'V': if (n != 1) { r.status(role::LinkBadLength); return; } mspi::State::rc.regs[0x37] = in[0]; r.status(role::LinkOk); return;
+      case 'Q': if (n != 1) { r.status(role::LinkBadLength); return; } r.status(role::LinkOk); r.put(mspi::State::rc.regs[in[0] & 0x3F]); return;
       case 'R': if (n != 1) { r.status(role::LinkBadLength); return; } r.status(role::LinkOk); r.put(State::c76.regs[in[0]]); return;
       case 'S': {
         if (n != 8) { r.status(role::LinkBadLength); return; }

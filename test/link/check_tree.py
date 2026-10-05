@@ -1,6 +1,7 @@
-"""The Python consumer of a machine tree (python/onemachine/tree.py) against the spi example's air sensor on a simulated chip (tree_device.cpp),
-over a pipe (StreamLink) and in-process (CtypesLink): the description, values, a set by code and its read-back from the chip, the refusals,
-a reset behind the host's back, an unplug with a set while it is gone, the notifications, and a full queue."""
+"""The Python consumer of a machine tree (python/onemachine/tree.py) against the spi example's two machines on simulated chips (tree_device.cpp: a BMP280
+and an RC522), over a pipe (StreamLink) and in-process (CtypesLink): the description, values, a set by code and its read-back from the chip, the refusals,
+a reset behind the host's back, an unplug with a set while it is gone, the reader's gain and antenna, the card as an event, the notifications, and a
+full queue."""
 import os, struct, sys
 D = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(D, '..', '..', 'python'))
@@ -17,12 +18,13 @@ link = CtypesLink(os.path.join(D, 'tree_device.so'), autocycle=False) if CTYPES 
 def op(c, payload=b''):
     st, data = link.call(c, payload); return st, data
 def advance(ms): check(op('t', struct.pack('<I', ms))[0] == 0, 'advance')
-def reg(a): return op('R', bytes([a]))[1][0]
+def reg(a): return op('R', bytes([a]))[1][0]                  # a register of the simulated BMP280
+def rreg(a): return op('Q', bytes([a]))[1][0]                 # a register of the simulated RC522
 
 st, d = op('d')
 HASHED = d.startswith(b'hash ')
 if HASHED:
-    check(len(d) == 5 + 8 + 1 + 6 + 1 and d.endswith(b'000000\n'), 'd by hash: the hash and six statuses, %d bytes: %r' % (len(d), d))
+    check(len(d) == 5 + 8 + 1 + 8 + 1 and d.endswith(b'00000000\n'), 'd by hash: the hash and eight statuses, %d bytes: %r' % (len(d), d))
     try: Tree(link); check(False, 'a device described by hash, and no description directory')
     except LinkError as e: check('-DONEMACHINE_DESC_TEXT' in str(e) and d[5:13].decode() in str(e), 'a readable error: %s' % e)
 m = Tree(link, descriptions=DESC)
@@ -36,13 +38,17 @@ if not HASHED and DESC:                                  # the two walks: the te
     built = open(os.path.join(DESC, files[0])).read()
     built = built[:built.index('wiring ')] if 'wiring ' in built else built      # the wiring lines are the build output's only (the text build is Round 6's)
     check(len(files) == 1 and static == built, 'the text walk and the hash walk write the same description')
-check(list(m.codes) == ['temp', 'press', 'air', 'air/config', 'air/ctrl_meas', 'card'], 'the codes, in the device\'s order: %s' % list(m.codes))
+check(list(m.codes) == ['temp', 'press', 'air', 'air/config', 'air/ctrl_meas', 'card', 'rfid/gain', 'rfid/antenna'], 'the codes, in the device\'s order: %s' % list(m.codes))
 check(m.codes['temp'].scaled == 2 and m.codes['temp'].notify == 'sync' and m.codes['temp'].ro, 'temp: scaled 2, notifies, read-only')
 check(m.codes['air'].kind == 'group' and m.codes['air'].group_size == 2, 'air is a group of 2')
 c = m.codes['air/ctrl_meas']
 check(c.kind == 'reg' and not c.ro and (c.lo, c.hi, c.default) == (0, 255, 0x57) and c.notify is None, 'air/ctrl_meas: a register, rw, 0..255, default 0x57, silent')
-check(m.codes['card'].notify == 'event' and m.codes['card'].unit == 'u32', 'card: an event, u32')
-check([c.num for c in m._codes] == list(range(6)), 'numbered in order')
+check(m.codes['card'].notify == 'event' and m.codes['card'].unit == 'u32' and m.codes['card'].ro and m.codes['card'].path == [0, 0, 0], 'card: an event, u32, node #0 of the reader')
+c = m.codes['rfid/gain']
+check(c.kind == 'reg' and not c.ro and (c.lo, c.hi, c.default) == (0, 7, 4) and c.field == (6, 4) and c.notify is None and c.path == [0, 0, 2, 6], 'rfid/gain: bits 6..4 of a register, rw, 0..7, default 4, silent')
+c = m.codes['rfid/antenna']
+check(c.kind == 'reg' and not c.ro and (c.lo, c.hi, c.default) == (0, 3, 3) and c.field == (1, 0), 'rfid/antenna: bits 1..0 of a register, rw, 0..3, default 3')
+check([c.num for c in m._codes] == list(range(8)), 'numbered in order')
 check(all(c.status == 'alive' for c in m._codes) and m.status('temp') == 'alive' and m.status('card') == 'alive', 'every code is alive in the description')
 
 # ---- values, scaled by the description -----------------------------------------------------------------------------------------
@@ -50,6 +56,7 @@ advance(500)
 check(abs(m.temp - 25.08) < 1e-9 and abs(m.press - 1006.53) < 1e-9, 'temp 25.08, press 1006.53: %r %r' % (m.temp, m.press))
 check(m.raw('temp') == 2508 and m.raw('press') == 100653, 'the raw integers')
 check(m.air.ctrl_meas == 0x57 and m.air.config == 0x90, 'the registers read from the chip: the defaults')
+check(m.rfid.gain == 4 and m.rfid.antenna == 3 and rreg(0x26) == 0x48 and rreg(0x14) == 0x83, 'the reader\'s fields read from its chip: the defaults (the registers 0x48 and 0x83)')
 try: m.raw('air'); check(False, 'a group has no value')
 except AttributeError: pass
 
@@ -80,7 +87,7 @@ except AttributeError: pass
 try: m.nothing; check(False, 'unknown code')
 except UnknownCode: pass
 st, _ = op('w', struct.pack('<i', 1) + key('temp')); check(st == 0x82, 'a set of a read-only code: the device answers ReadOnly')
-st, _ = op('v', struct.pack('<IB', m.hash, 6) if HASHED else b'nope'); check(st == 0x80, 'an unknown code: Unknown')
+st, _ = op('v', struct.pack('<IB', m.hash, 8) if HASHED else b'nope'); check(st == 0x80, 'an unknown code: Unknown')
 if HASHED:                                               # a number is valid only under the hash it was read with; names are not codes here
     st, _ = op('v', struct.pack('<IB', m.hash ^ 1, 0)); check(st == 1, 'another build\'s hash: BadHash (%d)' % st)
     st, _ = op('w', struct.pack('<i', 0x27) + struct.pack('<IB', m.hash ^ 1, 4)); check(st == 1 and reg(0xF4) == 0x27, 'a set under another hash: BadHash, nothing written')
@@ -91,6 +98,67 @@ if HASHED:                                               # a number is valid onl
 op('x'); check(reg(0xF4) == 0x00, 'the chip lost its settings')
 advance(300)
 check(reg(0xF4) == 0x27 and reg(0xF5) == 0x90 and m.air.ctrl_meas == 0x27, 'restored, not the defaults')
+
+# ---- the reader's registers: set by code, to its chip; its limits; a reset behind the host's back; the last setting comes back ------------------------------
+m.changes()
+m.rfid.gain = 7
+check(rreg(0x26) == 0x78 and m.rfid.gain == 7, 'set rfid/gain: bits 6..4 of the reader\'s register, the other bits kept (0x78), and it reads back')
+check(m.changes() == [], 'a silent code does not notify')
+for bad in (8, -1, 300):
+    try: m.rfid.gain = bad; check(False, 'range %r' % bad)
+    except OutOfRange: pass
+for bad in (4, -1):
+    try: m.rfid.antenna = bad; check(False, 'antenna %r' % bad)
+    except OutOfRange: pass
+check(rreg(0x26) == 0x78 and rreg(0x14) == 0x83, 'refused here: nothing was sent')
+st, _ = op('w', struct.pack('<i', 8) + key('rfid/gain')); check(st == 3 and rreg(0x26) == 0x78, 'the device refuses a gain outside the range too (BadValue)')
+st, _ = op('w', struct.pack('<i', 4) + key('rfid/antenna')); check(st == 3 and rreg(0x14) == 0x83, 'and an antenna outside 0..3')
+try: m.card = 1; check(False, 'card is read-only')
+except ReadOnly: pass
+st, _ = op('w', struct.pack('<i', 1) + key('card')); check(st == 0x82, 'a set of the card: the device answers ReadOnly')
+m.rfid.antenna = 0
+check(rreg(0x14) == 0x80 and m.rfid.antenna == 0, 'the antenna off: both TX drivers (bit 7 is kept)')
+m.rfid.antenna = 1
+check(rreg(0x14) == 0x81 and m.rfid.antenna == 1, 'TX1 only is a setting too')
+m.rfid.antenna = 0
+op('X'); check(rreg(0x26) == 0x48 and rreg(0x14) == 0x80 and rreg(0x2B) == 0x00, 'an RST pulse: the reader lost its configuration (gain back at 4)')
+advance(300)
+check(rreg(0x26) == 0x78 and rreg(0x14) == 0x80 and rreg(0x2B) == 0xA9, 'the canary caught it: the gain and the antenna that were set, the timer as it was')
+check(m.rfid.gain == 7 and m.rfid.antenna == 0 and m.status('rfid/gain') == 'alive', 'and it reads them back')
+check(m.changes() == [], 'a reset that was repaired says nothing')
+m.rfid.antenna = 3
+
+# ---- the reader vanishes (RST low): Stale for every one of its codes, once; a set while it is gone is the last intent --------------------------------------
+check(m.status('card') == 'alive' and m.status('rfid/gain') == 'alive', 'alive before')
+op('H'); advance(1500)
+ch = m.changes()
+check(sorted(x.code for x in ch if x.status == 'stale') == ['card', 'rfid/antenna', 'rfid/gain'] and len([x for x in ch if x.status]) == 3, 'the reader\'s three codes go stale, once: %r' % ch)
+check(m.status('rfid/gain') == 'stale' and m.status('card') == 'stale' and m.status('air') == 'alive' and m.status('temp') == 'alive', 'stale for the reader, alive for the air sensor')
+try: m.rfid.gain; check(False, 'a register of a stale part raises')
+except Stale as e: check(e.last == 7, 'a register answers its last set, not 0: %r' % e.last)
+m.rfid.gain = 5
+check(m.reading('rfid/gain') == (5, 'stale'), 'the intent is what it answers: %r' % (m.reading('rfid/gain'),))
+op('h'); advance(3000)
+check(rreg(0x26) == 0x58 and rreg(0x14) == 0x83 and m.rfid.gain == 5, 'released: the last intent came back, not the default')
+ch = m.changes()
+check(sorted(x.code for x in ch if x.status == 'alive') == ['card', 'rfid/antenna', 'rfid/gain'], 'and the return is announced: %r' % [x for x in ch if x.status])
+op('V', bytes([0x91])); op('X'); advance(300)
+check(rreg(0x26) == 0x48 and m.rfid.gain == 4, 'another VersionReg is another part: the defaults, not 5')
+op('V', bytes([0x92])); op('X'); advance(300); m.changes()
+
+# ---- the card, read from the reader: an event with a value, as it arrives and as it leaves --------------------------------------------------------------
+op('C', struct.pack('<I', 0xDEADBEEF)); advance(500)
+ch = m.changes()
+check([(x.code, x.value) for x in ch if x.status is None] == [('card', 0xDEADBEEF)], 'the card arrives: %r' % ch)
+op('C', struct.pack('<I', 0)); advance(500)
+ch = m.changes()
+check([(x.code, x.value) for x in ch if x.status is None] == [('card', 0)], 'and leaves: %r' % ch)
+m.rfid.antenna = 0
+op('C', struct.pack('<I', 0xCAFEF00D)); advance(1000)
+check(m.changes() == [], 'the antenna off: no card is seen')
+m.rfid.antenna = 3; advance(500)
+check([(x.code, x.value) for x in m.changes()] == [('card', 0xCAFEF00D)], 'on again: the card is read')
+op('C', struct.pack('<I', 0)); advance(500); m.changes()
 
 # ---- unplugged: Stale, not a register that reads 0xFF; a set while it is gone is the last intent ----------------------------------
 m.changes()
@@ -120,14 +188,10 @@ check(sorted(x.code for x in ch if x.status == 'alive') == ['air', 'air/config',
 check(m.status('air') == 'alive' and m.status('temp') == 'alive', 'alive again')
 check(m.temp == t_before, 'and reads again')
 
-# ---- the card's row has a status of its own -------------------------------------------------------------------------------------
-op('z', bytes([2])); advance(20)
-ch = m.changes()
-check([x for x in ch if x.status] == [Change('card', status='gone')] and m.status('card') == 'gone' and m.status('air') == 'alive', 'the card\'s row gone: %r' % ch)
-op('z', bytes([0])); advance(20); m.changes()
+# ---- the card is an event: no value, the status alone --------------------------------------------------------------------------------------------------
 st, d = op('v', key('card')); check(st == 4 and d == bytes([0]), 'an event has no value: NoValue and the status alone')
 
-# ---- the card: an event with a value ------------------------------------------------------------------------------------------
+# ---- events queued with nobody at the reader (the queue alone) --------------------------------------------------------------------------------------
 m.changes()
 op('k', struct.pack('<I', 0xF22216F6)); op('k', struct.pack('<I', 0))
 ch = m.changes()
@@ -163,9 +227,9 @@ check(st == 0 and len(data) > 4, 'an answer that is lost')
 r0 = m.resyncs
 ch = m.changes()                                                                         # still asks since seq0: the device answered since
 check(m.resyncs == r0 + 1, 'the device saw the lost reply: resync')
-check(sorted({x.code for x in ch if x.status is None}) == ['air/config', 'air/ctrl_meas', 'press', 'temp']
+check(sorted({x.code for x in ch if x.status is None}) == ['air/config', 'air/ctrl_meas', 'press', 'rfid/antenna', 'rfid/gain', 'temp']
       and {x.code: x.raw for x in ch if x.status is None}['temp'] == m.raw('temp'), 'every code with a value, as it is now: %r' % ch)
-check(sorted(x.code for x in ch if x.status == 'alive') == ['air', 'air/config', 'air/ctrl_meas', 'card', 'press', 'temp'], 'and every row\'s status')
+check(sorted(x.code for x in ch if x.status == 'alive') == ['air', 'air/config', 'air/ctrl_meas', 'card', 'press', 'rfid/antenna', 'rfid/gain', 'temp'], 'and every row\'s status')
 check(m.changes() == [] and m.resyncs == r0 + 1, 'then in step again')
 
 print('FAILED: %d' % failures if failures else 'OK: python Tree over %s, description %s' % ('ctypes' if CTYPES else 'a pipe', 'by hash' if HASHED else 'as text'))

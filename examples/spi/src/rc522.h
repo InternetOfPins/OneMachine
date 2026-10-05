@@ -39,7 +39,7 @@ namespace rc522 {
   enum Reg : uint8_t {
     CommandReg = 0x01, ComIEnReg = 0x02, DivIEnReg = 0x03, ComIrqReg = 0x04, ErrorReg = 0x06, FIFODataReg = 0x09, FIFOLevelReg = 0x0A,
     ControlReg = 0x0C, BitFramingReg = 0x0D, CollReg = 0x0E, ModeReg = 0x11, TxControlReg = 0x14, TxASKReg = 0x15,
-    TModeReg = 0x2A, TPrescalerReg = 0x2B, TReloadRegH = 0x2C, TReloadRegL = 0x2D, VersionReg = 0x37,
+    TModeReg = 0x2A, TPrescalerReg = 0x2B, TReloadRegH = 0x2C, TReloadRegL = 0x2D, RFCfgReg = 0x26, VersionReg = 0x37,
   };
   enum Cmd : uint8_t { Idle = 0x00, Transceive = 0x0C, SoftReset = 0x0F };
 
@@ -140,6 +140,18 @@ namespace rc522 {
   template<typename M, typename = void> struct IrqOf { using type = NoIrq; };
   template<typename M> struct IrqOf<M, Void<typename M::Irq>> { using type = typename M::Irq; };
 
+  // The configuration part: what the chip is configured with, and the check that it still is. Absent by default (NoConf): init() writes the values below
+  // and configured() reads three of them back. A machine (rc522_machine.h) is one: `Conf::on`, and
+  //   begin(row)   after the soft reset has taken effect, before the first write: a new initialisation starts
+  //   write(row)   the configuration, written (init() repeats it until ok() holds: only a chip whose oscillator runs keeps what is written)
+  //   ok(row)      the configuration, read back
+  //   seen(uid)    the card in the field: the UID, 0 when it leaves
+  struct NoConf { static constexpr bool on = false; };
+
+  // the SPI clock the driver asks for (the chip takes 10 MHz; 4 is kind to jumper wires) and its mode
+  inline constexpr uint32_t spiHzOf = 4000000;
+  inline constexpr uint8_t  spiModeOf = 0;
+
   // no failure handling: the driver polls and nothing is retried, probed or reported
   struct NoFail {
     static constexpr bool lifecycle = false, returnPath = false, idempotent = true;
@@ -147,8 +159,8 @@ namespace rc522 {
     template<typename Impl, typename W> using Access = fail::SpiAccess<Impl, W>;
   };
 
-  template<typename W, typename M = NoFail, uint8_t K = 1>
-  struct Rc522 : discover::SpiDriverBase<Rc522<W, M, K>, W>, fail::DevEdge<Rc522<W, M, K>, W, M, K> {
+  template<typename W, typename M = NoFail, uint8_t K = 1, typename Conf = NoConf>
+  struct Rc522 : discover::SpiDriverBase<Rc522<W, M, K, Conf>, W>, fail::DevEdge<Rc522<W, M, K, Conf>, W, M, K> {
     using B    = discover::SpiDriverBase<Rc522, W>;
     using Edge = fail::DevEdge<Rc522, W, M, K>;
     using Irq  = typename IrqOf<M>::type;
@@ -156,8 +168,8 @@ namespace rc522 {
     static constexpr bool mayIsolate = true;   // a health monitor may quarantine the row (it has no isolate(): nothing cuts its supply)
     static constexpr uint8_t recoverMask = fail::bit(fail::Kind::Corrupt);   // a reset the host did not see: init again
 
-    static constexpr uint32_t spiHz   = 4000000;   // the chip takes 10 MHz; 4 is kind to jumper wires
-    static constexpr uint8_t  spiMode = 0;
+    static constexpr uint32_t spiHz   = spiHzOf;
+    static constexpr uint8_t  spiMode = spiModeOf;
     static constexpr uint8_t  idCmd   = uint8_t((VersionReg << 1) | 0x80);
     using Ids = rc522::Ids;   // the manifest's
 
@@ -190,7 +202,8 @@ namespace rc522 {
 
     // the configuration init() writes, read back: only a chip whose oscillator runs keeps what is written
     static bool configured(RowId row) {
-      return rd(row, TPrescalerReg) == 0xA9 && rd(row, TReloadRegL) == 0xE8 && (rd(row, TxControlReg) & 0x03) == 0x03;
+      if constexpr (Conf::on) return Conf::ok(row);
+      else return rd(row, TPrescalerReg) == 0xA9 && rd(row, TReloadRegL) == 0xE8 && (rd(row, TxControlReg) & 0x03) == 0x03;
     }
 
     // A SoftReset restarts the oscillator and takes effect some time after the write; there is no clock here, so
@@ -206,14 +219,19 @@ namespace rc522 {
       wr(row, CommandReg, SoftReset);
       for (uint16_t i = 0; i < 60000 && rd(row, TReloadRegL) != 0x00; ++i) {}
       for (uint16_t i = 0; i < 60000 && (rd(row, CommandReg) & 0x10); ++i) {}
+      if constexpr (Conf::on) Conf::begin(row);
       for (uint16_t i = 0; i < 1000; ++i) {
-        wr(row, TModeReg, 0x80);       // timer starts at the end of a transmission
-        wr(row, TPrescalerReg, 0xA9);  // 40 kHz tick
-        wr(row, TReloadRegH, 0x03);    // 1000 ticks: a 25 ms receive timeout
-        wr(row, TReloadRegL, 0xE8);
-        wr(row, TxASKReg, 0x40);       // 100% ASK
-        wr(row, ModeReg, 0x3D);        // CRC preset 0x6363
-        wr(row, TxControlReg, uint8_t(rd(row, TxControlReg) | 0x03));   // antenna on
+        if constexpr (Conf::on) {
+          Conf::write(row);
+        } else {
+          wr(row, TModeReg, 0x80);       // timer starts at the end of a transmission
+          wr(row, TPrescalerReg, 0xA9);  // 40 kHz tick
+          wr(row, TReloadRegH, 0x03);    // 1000 ticks: a 25 ms receive timeout
+          wr(row, TReloadRegL, 0xE8);
+          wr(row, TxASKReg, 0x40);       // 100% ASK
+          wr(row, ModeReg, 0x3D);        // CRC preset 0x6363
+          wr(row, TxControlReg, uint8_t(rd(row, TxControlReg) | 0x03));   // antenna on
+        }
         if constexpr (Irq::on) { wr(row, DivIEnReg, Irq::pushPull); wr(row, ComIEnReg, Irq::idle); }   // the IRQ pin driven, nothing enabled
         if (configured(row)) { B::dev(row).initTries = uint16_t(i + 1); return; }
       }
@@ -296,7 +314,7 @@ namespace rc522 {
 
     static void commit(RowId row, uint32_t uid) {
       auto& st = B::dev(row);
-      if (uid != st.uid) { st.uid = uid; st.missStreak = 0; B::template emit<Card>(row, uid); }
+      if (uid != st.uid) { st.uid = uid; st.missStreak = 0; if constexpr (Conf::on) Conf::seen(uid); B::template emit<Card>(row, uid); }
     }
 
     // The end of the command in flight: by the line (read before the register, which is then released and cleared), or, for a row that fell
@@ -354,7 +372,7 @@ namespace rc522 {
       auto& st = B::dev(row);
       st.missStreak = 0; st.corrupt = 0;
       if constexpr (Irq::on) { pollOf(row).phase = Rest; pollOf(row).limit.disarm(); }
-      if (st.uid) { st.uid = 0; B::template emit<Card>(row, 0); }
+      if (st.uid) { st.uid = 0; if constexpr (Conf::on) Conf::seen(0); B::template emit<Card>(row, 0); }
     }
 
     static void read(RowId row) { Edge::serve(row, fail::Cause::Fresh); }
@@ -397,7 +415,7 @@ namespace rc522 {
           if (uint8_t(r[0] ^ r[1] ^ r[2] ^ r[3]) != r[4]) { ++st.bccErrors; return; }
           uid = (uint32_t(r[0]) << 24) | (uint32_t(r[1]) << 16) | (uint32_t(r[2]) << 8) | r[3];
         }
-        if (uid != st.uid) { st.uid = uid; st.missStreak = 0; B::template emit<Card>(row, uid); }
+        if (uid != st.uid) { st.uid = uid; st.missStreak = 0; if constexpr (Conf::on) Conf::seen(uid); B::template emit<Card>(row, uid); }
       }
     }
   };

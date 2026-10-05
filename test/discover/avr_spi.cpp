@@ -3,12 +3,16 @@
 //   (default)    the driver with no interrupt part: its image is the driver as it was before the interrupt part existed (build_spi1.sh checks the size)
 //   -DWITH_IRQ=1 with rc522::Interrupt (the IRQ on PD2, sampled), service() folded over the rows
 //   -DWITH_IRQ=2 and the LineCheck and PollOnLineFault parts
+//   -DMACHINE    the driver configured by the RC522 machine (examples/spi/src/rc522_machine.h), with no interrupt part
 #include <stdint.h>
 #include <avr/io.h>
 #include <hapi/hapi.h>
 #include <chips/avr/avrSpi.h>
 #include <oneMachine/discover/spi.h>
 #include "../../examples/spi/src/rc522.h"
+#ifdef MACHINE
+#include "../../examples/spi/src/rc522_machine.h"
+#endif
 #ifdef WITH_IRQ
 #include <oneMachine/fail/world.h>
 #endif
@@ -44,6 +48,9 @@ struct IrqMode : rc522::NoFail {
 };
 struct App;
 using Rfid = rc522::Rc522<App, IrqMode>;
+#elif defined(MACHINE)
+struct App;
+using Rfid = rc522m::Machine<App, rc522m::Slot<0>>::Driver;
 #else
 struct App;
 using Rfid = rc522::Rc522<App>;

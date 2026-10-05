@@ -1,6 +1,7 @@
-// What the spi example publishes of its air sensor: the codes, the published nodes and the card's line, in one place. The sketch (main.cpp), the
-// simulated device (test/link/tree_device.cpp), the AVR image (test/link/avr_tree.cpp) and the description generator (examples/spi/describe.cpp)
-// all build them from here, so the description the generator writes is the one the firmware's hash is computed from.
+// What the spi example publishes: the air sensor's codes and published nodes (the reader's are rfid_tree.h's), the wiring, and the description of both
+// machines, in one place. The sketch (main.cpp), the simulated device (test/link/tree_device.cpp), the AVR image (test/link/avr_tree.cpp) and the
+// description generator (examples/spi/describe.cpp) all build them from here, so the description the generator writes is the one the firmware's hash is
+// computed from.
 //   M      the machine (bmpm::Machine<W, Criteria, Mode>)
 //   Note   Note<Code>::fn: a constexpr pointer to what a published value calls when it changes (the App's: print it, mark it for the link, ...)
 #pragma once
@@ -10,6 +11,7 @@
 #include <oneMachine/discover/manifest.h>
 #include "bmp280_machine.h"
 #include "rc522.h"
+#include "rfid_tree.h"
 
 namespace airTree {
 
@@ -19,7 +21,7 @@ namespace airTree {
   struct CodeAir      { static constexpr uint8_t num = 2; ONEMACHINE_STATE_NAME(name, "air"); };
   struct CodeConfig   { static constexpr uint8_t num = 3; ONEMACHINE_STATE_NAME(name, "air/config"); };
   struct CodeCtrlMeas { static constexpr uint8_t num = 4; ONEMACHINE_STATE_NAME(name, "air/ctrl_meas"); };
-  struct CodeCard     { static constexpr uint8_t num = 5; ONEMACHINE_STATE_NAME(name, "card"); };
+  using rfidTree::CodeCard;   // 5, then rfid/gain 6 and rfid/antenna 7
 
   // ---- the wiring: the rig's pins, the one place the sketch takes them from (experiment 6) ------------------------------------------------
   // The board's pins and their facts are OneChip's (Esp8266Pins); who drives each line is the drivers' manifests' (rc522::Manifest, bmpm::Manifest)
@@ -63,13 +65,6 @@ namespace airTree {
     bmpm::PublishedAt<CodeConfig,   bmpm::PathRef<M, 3, 0>>,
     bmpm::PublishedAt<CodeCtrlMeas, bmpm::PathRef<M, 3, 1>>>;
 
-  // the card: a code that only notifies (an event with a value, the UID, 0 when it leaves). The App's text line is cardText then the status of the
-  // reader's row; the description's static line (its hash, the build output) is cardText without the trailing " status ".
-  // (a macro, so an App's text path uses it as a literal of its own, as before: the text build is the same image to the byte)
-  #define AIRTREE_CARD_TEXT "  card -> 0/1 notify event ro value u32 status "
-  inline constexpr char cardText[] = AIRTREE_CARD_TEXT;
-  template<typename P> constexpr void cardLine(P& put) { for (unsigned i = 0; i + 8 < sizeof cardText - 1; ++i) put(cardText[i]); put('\n'); }
-
   // ---- the wiring lines of the description (the build output's, by hash: they cost the device nothing) -----------------------------------
   //   wiring wemos-d1-mini
   //     i2c sda 4 shared scl 5 mcu
@@ -98,6 +93,27 @@ namespace airTree {
     w.str("  empty"); w.pin("cs", W::emptyCs, discover::SpiLines::cs); put('\n');
     w.str("  air "); w.str(bmpm::Manifest::name); w.str(" at "); w.hex(W::airAddr); put('\n');
   }
-  // the App's static tail of the description: the card's line, then the wiring
-  template<typename P> constexpr void describeStatic(P& put) { cardLine(put); wiringLines(put); }
+  // The App's tree: both machines and what is published of them (the air sensor's codes, then the reader's), then the wiring. Pubs is the list the link's
+  // codes are numbered by. describe is the text with the status of each row (the text build); describeStatic is the same without them and with the wiring,
+  // a compile-time fold (the description's hash and the build output).
+  //   BM, BP  the air sensor's machine and its published nodes     RM, RP  the reader's
+  template<typename BM, typename BP, typename RM, typename RP>
+  struct Tree {
+    using Pubs = typename hapi::ConcatChains<BP, RP>::Type;
+    template<typename P> static void describe(P& put) {
+      bmpm::Walk<P> b{put}; rc522m::Walk<P> r{put};
+      b.template machine<BM>(); r.template machine<RM>();
+      b.str("published\n");
+      b.template publishedAll<BM>(static_cast<BP*>(nullptr), bus);
+      r.template publishedAll<RM>(static_cast<RP*>(nullptr), rfidTree::bus);
+    }
+    template<typename P> static constexpr void describeStatic(P& put) {
+      bmpm::HashWalk<P> b{put}; rc522m::HashWalk<P> r{put};
+      b.template machine<BM>(); r.template machine<RM>();
+      b.str("published\n");
+      b.template publishedAll<BM>(static_cast<BP*>(nullptr), bus);
+      r.template publishedAll<RM>(static_cast<RP*>(nullptr), rfidTree::bus);
+      wiringLines(put);
+    }
+  };
 }

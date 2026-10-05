@@ -61,6 +61,25 @@ written again; another part, the settings are dropped and the defaults are the i
 Keys: `a` reads the control group by path, `o` sets `ctrl_meas` to oversampling x1, `q` to 0x2B (also while the sensor is unplugged), `r` writes the
 registers' defaults, `x` resets the sensor behind the host's back.
 
+## The RFID reader as a machine
+
+In the link build (`-DONEMACHINE_LINK`) the RC522 is a machine too (`src/rc522_machine.h`), `Machine<W, Slot<0>>`: its Criteria is the position of its
+chip select in the bus's `SpiSlots`. Nodes: `#0 card` (the UID of the card in the field, 0 when it leaves: an event, read-only), `#1 version` (VersionReg:
+device data, read when the part is found, never published) and `#2 rf`, a group of the registers the driver configures the chip with (`TModeReg`,
+`TPrescalerReg`, `TReloadRegH/L`, `TxASKReg`, `ModeReg`, `RFCfgReg`, `TxControlReg`); their defaults are the init.
+
+The registers are what the driver's canary reads back: each poll compares every one with what is wanted of it, and a chip that no longer holds them was
+reset behind the host's back (Corrupt, initialised again). What is wanted is the default until a set changes it, also while the reader is gone; a reader
+that comes back (the same VersionReg) gets what was last wanted, another one gets the defaults. The interrupt registers are not nodes: they change during
+every command and belong to the driver's interrupt part. Without the machine (`d1_mini`) the driver is the one it was: `Rc522<W, Mode>` writes the same
+values and reads three back.
+
+The App publishes `card` (an event), `rfid/gain` (bits 6..4 of `RFCfgReg`, 0..7, 4 by default: the datasheet's dB table is not monotonic, so it is not
+scaled) and `rfid/antenna` (bits 1..0 of `TxControlReg`, 0..3: 0 both TX drivers off, 3 both on). A code that is a `field` of its register is set by
+read-modify-write: the other bits of the register stay as they are wanted of it, not as the chip holds them (RFCfgReg bit 3 is reserved and set in
+its reset value). The canary still checks the whole register. The timer registers are reconciled and not published. `src/rfid_tree.h` holds the codes, and `src/air_tree.h` puts
+both machines in one description (`machine bmp280 ...`, `machine rc522 ...`, then `published`).
+
 ## A Python consumer over the serial port
 
 `pio run -e d1_mini_link -t upload` builds the same sketch with the serial port carrying the link (`role/link.h`, with payload ops) instead of the log. `python/onemachine` reads it, with the package's own `StreamLink`:
@@ -76,8 +95,9 @@ m.changes()                                            # [Change('temp', 27.61, 
 m.status('air')                                        # 'alive', 'stale' or 'gone': the part's row; m.temp raises Stale when it is not alive
 ```
 
-Ops: `d` the description by its hash and each code's status (the text is in the build output: `.pio/build/<env>/description/<hash>.txt`, written by `describe.py` from the same types, `src/air_tree.h`; give it as `Tree(link, descriptions=...)`; env `d1_mini_link_text` sends the text itself), `v` get by code (the code is its number under the description's hash, u32 hash then u8 number, or its name in the text build; the status first, then the value; a part that is not alive answers its last value), `w` set by code (through the node: its limits, its capture, its register), `n` the changes since the sequence number of the last reply (state codes once each with their value now, a row's status, and the events), `f` one
-fault key (`x` resets the air sensor behind the host's back, `v` and `p` reset the RFID reader). State and events are kept apart: a state code
+Ops: `d` the description by its hash and each code's status (the text is in the build output: `.pio/build/<env>/description/<hash>.txt`, written by `describe.py` from the same types, `src/air_tree.h`; give it as `Tree(link, descriptions=...)`; env `d1_mini_link_text` sends the text itself), `v` get by code (the code is its number under the description's hash, u32 hash then u8 number, or its name in the text build; the status first, then the value; a part that is not alive answers its last value), `w` set by code (through the node: its limits, its register), `n` the changes since the sequence number of the last reply (state codes once each with their value now, a row's status, and the events), `f` one
+fault key (`x` resets the air sensor behind the host's back, `v` and `p` reset the RFID reader). A set goes through the node: its limits (a range, or the
+values it allows), its register. State and events are kept apart: a state code
 (temp, press, a register, a row's status) is one pending bit, so a consumer that does not read for a while gets each code once with its latest value
 and nothing is lost; the card is an event and waits in a `fail::Buffer` of 8: when it is full the newest are refused and counted (`m.missed`). A reply
 that is lost is seen by its sequence number, and the next one carries every code (`m.resyncs`).

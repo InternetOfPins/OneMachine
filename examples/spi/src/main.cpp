@@ -142,7 +142,12 @@ struct RfidMode {
   template<typename Impl, typename W> using Access = fail::SpiAccess<Impl, W>;
   using Irq = rc522::Interrupt<irq::Sampled<airTree::Wiring::rfidIrq>, IrqCounters, rc522::LineCheck, rc522::PollOnLineFault>;   // D0
 };
+#if defined(ONEMACHINE_LINK) || defined(ONEMACHINE_RFID_MACHINE)
+using Reader = rfidTree::Machine<RfidApp, RfidMode>;   // the reader as a machine (rc522_machine.h): its registers are the configuration the canary reads back
+using Rfid = Reader::Driver;
+#else
 using Rfid = rc522::Rc522<RfidApp, RfidMode, 1>;
+#endif
 using RfidDrivers = discover::DriversIn<Chain<Rfid>>;
 #ifdef ONEMACHINE_LINK
 using RfidConsumers = Chain<Printer, CardNotifier>;
@@ -344,18 +349,8 @@ static void faultTick(uint32_t now) {
 #ifdef ONEMACHINE_LINK
 // the link (role/link.h with payload ops): the description, get and set by code, the changes since the last read, a row's status (tree_ops.h), and the
 // faults above (op 'f', one key)
-struct Extra {   // a code that only notifies: the card (an event with a value, the UID, 0 when it leaves), with the status of the reader's row
-  using Codes = Chain<CodeCard>;
-  static uint8_t status(uint8_t) { return RfidApp::reg.count > 1 ? uint8_t(RfidApp::reg.status(1)) : 2; }
-  template<typename P> static void describe(P& put) {
-    const char* s = AIRTREE_CARD_TEXT; while (*s) put(*s++);
-    const uint8_t st = status(0);
-    s = st == 0 ? "alive" : st == 1 ? "stale" : "gone"; while (*s) put(*s++);
-    put('\n');
-  }
-  template<typename P> static constexpr void describeStatic(P& put) { airTree::describeStatic(put); }
-};
-using Ops = bmpm::TreeOps<Bmp, Published, Extra, airBus, 8>;
+using Tree = airTree::Tree<Bmp, Published, Reader, rfidTree::Pubs<Reader>>;   // both machines, and what is published of them
+using Ops = bmpm::TreeOps<Tree, 8>;
 struct SerialOut { static void put(uint8_t b) { Serial.write(b); } };
 static uint32_t linkNow = 0;
 struct LinkApp {

@@ -9,6 +9,7 @@
 //   (default)    LineCheck, no fallback: the line faults are the chip's as far as the edge is concerned (Recover initialises it)
 //   -DFALLBACK   LineCheck + PollOnLineFault: a line fault is reported as the delivery's and the row polls the register, still reading cards
 //   -DNOCHECK    no check: an unplugged line is not noticed, the commands end by the timeout and the register
+// Each of them also with -DMACHINE: the driver configured by the RC522 machine (examples/spi/src/rc522_machine.h), the same outcomes.
 // Native only. Time is simulated.
 #include <stdint.h>
 #include <cstdio>
@@ -17,6 +18,9 @@
 #include <oneMachine/fail/world.h>
 #include "../support/mockSpi.h"
 #include "../../examples/spi/src/rc522.h"
+#ifdef MACHINE
+  #include "../../examples/spi/src/rc522_machine.h"   // -DMACHINE: the same scenarios, the driver configured by the RC522 machine
+#endif
 
 using discover::RowId;
 using discover::Sample;
@@ -60,7 +64,11 @@ struct Mode {
 };
 
 struct App;
+#ifdef MACHINE
+using Rfid = rc522m::Machine<App, rc522m::Slot<0>, Mode>::Driver;
+#else
 using Rfid = rc522::Rc522<App, Mode, 1>;
+#endif
 struct App : discover::World<App, mspi::Bus, Chain<CardLog>, Chain<Rfid>, 3, discover::SpiScan, Chain<discover::SpiSlotIds<4>>> {
   static constexpr bool lifecycle = true;
   static void release(RowId) {}

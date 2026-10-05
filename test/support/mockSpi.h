@@ -33,7 +33,8 @@ namespace mspi {
                           // reset value of CommandReg (0x20, PowerDown clear) and 0 elsewhere -- no flag says it is over
     void reset(uint8_t version) {
       for (auto& r : regs) r = 0;
-      regs[0x37] = version; regs[0x14] = 0x80; n = 0; resetReads = 0; deaf = 0; pending = 0; held = false;
+      regs[0x37] = version; regs[0x14] = 0x80; regs[0x11] = 0x3F; regs[0x26] = 0x48;   // the registers that do not reset to 0: TxControlReg, ModeReg, RFCfgReg
+      n = 0; resetReads = 0; deaf = 0; pending = 0; held = false;
     }
     bool stall = false;   // a command never ends: no request is raised
     uint8_t lineFault = 0; // the IRQ line: 0 as the chip drives it, 1 stuck high (not connected), 2 stuck low

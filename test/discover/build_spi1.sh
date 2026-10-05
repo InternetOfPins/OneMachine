@@ -7,11 +7,13 @@
 #   link   : the Python consumer of the machine tree (python/onemachine/tree.py) against the air sensor on a simulated chip (test/link/build.sh).
 #   wiring : the rig's wiring spec checked, emitted as the App composition and diffed against the device's description (test/wiring/build.sh).
 #   irq    : the RC522's interrupt part (spi_irq.cpp) and the ESP8266 delivery components' pin rules (irq_delivery.cpp).
+#   rc522  : the RC522 as a machine of ItemDef nodes (rc522_machine.cpp), and spi_fail.cpp and spi_irq.cpp again with the driver configured by it (-DMACHINE).
 #   AVR    : avr-g++ -Os atmega328p, linked over the real AVR SPI core -- it builds, and its size.
 # Exits non-zero if an assertion fails, a rule does not fire, or the AVR image does not build.
 set -e
 cd "$(dirname "$0")"
 INC="-I ../../include -I ../../../HAPI/include -I ../../../OneBus/include"
+MINC="$INC -I ../../../OneData/include -I ../../../OneMenu/include -I ../../../OneItem/include -I ../../../OneOutput/include -I ../../../OneBit/include -I ../../../OnePin/include -I ../../../OneChip/include -I ../../../OneParse/include -I ../../../OneInput/include -I ../../../OneIO/include"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 rc=0
 # run a test binary: its last line, and a failure (its exit status, not tail's) when it does not exit 0
@@ -64,12 +66,25 @@ for cfg in "" "-DFALLBACK" "-DNOCHECK"; do
 done
 
 echo; echo "=== BMP280 as a machine of ItemDef nodes (bmp_machine.cpp): g++ -O1, then ASan/UBSan, then clang++ ==="
-MINC="$INC -I ../../../OneData/include -I ../../../OneMenu/include -I ../../../OneItem/include -I ../../../OneOutput/include -I ../../../OneBit/include -I ../../../OnePin/include -I ../../../OneChip/include -I ../../../OneParse/include -I ../../../OneInput/include -I ../../../OneIO/include"
 g++ -std=c++17 -O1 -Wall $MINC bmp_machine.cpp -o "$OUT/bm" && { "$OUT/bm" || rc=1; }
 g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all $MINC bmp_machine.cpp -o "$OUT/bmsan" && { run "$OUT/bmsan"; }
 if command -v clang++ >/dev/null; then
   clang++ -std=c++17 -O1 $MINC bmp_machine.cpp -o "$OUT/bmclang" && { run "$OUT/bmclang"; }
 fi
+
+echo; echo "=== RC522 as a machine of ItemDef nodes (rc522_machine.cpp): g++ -O1, then ASan/UBSan, then clang++ ==="
+g++ -std=c++17 -O1 -Wall $MINC rc522_machine.cpp -o "$OUT/rm" && { "$OUT/rm" || rc=1; } || { echo "FAIL: rc522_machine.cpp does not build"; rc=1; }
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all $MINC rc522_machine.cpp -o "$OUT/rmsan" && { run "$OUT/rmsan"; } || { echo "FAIL: rc522_machine.cpp (sanitizers) does not build"; rc=1; }
+if command -v clang++ >/dev/null; then
+  clang++ -std=c++17 -O1 $MINC rc522_machine.cpp -o "$OUT/rmclang" && { run "$OUT/rmclang"; } || { echo "FAIL: rc522_machine.cpp (clang++) does not build"; rc=1; }
+fi
+echo "--- the failure edge and the interrupt part with the driver configured by the machine (-DMACHINE): the same outcomes"
+g++ -std=c++17 -O2 -Wall -DMACHINE $MINC spi_fail.cpp -o "$OUT/sfm" && { "$OUT/sfm" || rc=1; }
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -DMACHINE $MINC spi_fail.cpp -o "$OUT/sfmsan" && { run "$OUT/sfmsan"; }
+for cfg in "" "-DFALLBACK" "-DNOCHECK"; do
+  g++ -std=c++17 -O2 -Wall -DMACHINE $cfg $MINC spi_irq.cpp -o "$OUT/sim" && echo "[machine ${cfg:-default}] $("$OUT/sim")" || rc=1
+  g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -DMACHINE $cfg $MINC spi_irq.cpp -o "$OUT/simsan" && { run "$OUT/simsan"; }
+done
 
 echo; echo "=== BMP280 machine, capture and restore under a failure edge (bmp_capture.cpp): g++ -O1, ASan/UBSan, clang++ ==="
 g++ -std=c++17 -O1 -Wall $MINC bmp_capture.cpp -o "$OUT/bc" && { "$OUT/bc" || rc=1; }

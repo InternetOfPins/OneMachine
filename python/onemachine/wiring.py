@@ -14,13 +14,13 @@ every PlatformIO build; without --facts this module builds it with the host's g+
   board   each D pin's GPIO, whether the chip samples it at reset (strap, and the level it needs) and whether it has an interrupt: OneChip's Esp8266Pins
   bus     who drives each bus line (I2C SDA shared, SCL the MCU; SPI MISO the part, the rest the MCU): discover::I2cLines, SpiLines
   driver  each driver's manifest beside the driver (bmpm::Manifest, rc522::Manifest): its bus, addresses, ids, its own lines and who drives each one,
-          its nodes (walked from its machine) or its event
+          its nodes (walked from its machine: a group's children are `group/child`)
 The rules, each with the sentence a person needs:
   - every pin is on the board and used once
   - a line the part drives or shares is not on a boot strap pin; the MCU's own lines may be (a chip select on D3 or D8 idles high and is fine)
   - an ISR delivery is not on a pin without an interrupt (GPIO16): it is sampled there
   - a part is on the bus its driver speaks, at an address and with ids its driver knows
-  - every published code names a node (or the event) its part has
+  - every published code names a node its part has
 """
 import os, re, subprocess, sys, tempfile, tomllib
 from .tree import _parse, wiring as _wiring
@@ -141,6 +141,8 @@ def check(spec, facts):
         if node not in drv.get('nodes', {}): errors.append('publish %s = %r: a %s has no node %r (it has %s)' % (code, where, p.get('driver'), node, ', '.join(drv.get('nodes', {}))))
     return errors
 
+_NAMESPACE = {'bmp280': 'bmpm', 'rc522': 'rc522m'}   # the namespace of each driver's machine header
+
 def _code_tag(code): return 'Code' + ''.join(w[:1].upper() + w[1:] for w in re.split(r'_', code.split('/')[-1]))   # air/ctrl_meas: CodeCtrlMeas
 
 def emit(spec, facts, checked=True):
@@ -168,10 +170,11 @@ def emit(spec, facts, checked=True):
         out.append('struct %s { static constexpr uint8_t num = %d; ONEMACHINE_STATE_NAME(name, "%s"); };' % (_code_tag(code), num, code))
     for code, where in spec['publish'].items():
         part, _, node = where.partition('/')
-        path, kind, dec = facts.drivers[parts[part]['driver']]['nodes'][node]
-        if path is None: continue                                                    # an event: the App's Extra, not a published node
+        driver = parts[part]['driver']
+        path, kind, dec = facts.drivers[driver]['nodes'][node]
         notify = ', oneData::OnSync<Note<%s>::fn>' % _code_tag(code) if kind == 'value' else ''
-        out.append('bmpm::PublishedAt<%s, bmpm::PathRef<M, %s>%s>' % (_code_tag(code), ', '.join(map(str, path)), notify))
+        ns = _NAMESPACE[driver]                                                      # a machine's published nodes are its header's: bmpm::, rc522m::
+        out.append('%s::PublishedAt<%s, %s::PathRef<M, %s>%s>' % (ns, _code_tag(code), ns, ', '.join(map(str, path)), notify))
     return out
 
 def wiring_header(lines): return '\n'.join(lines[:lines.index('};') + 1]) + '\n'
@@ -195,10 +198,11 @@ def diff(spec, facts, description):
         p = parts[part]
         path, kind, dec = facts.drivers[p['driver']]['nodes'][node]
         machine = names.index(part)
-        expect = [machine, 1 + spi_parts.index(p['cs'])] if path is None else [machine, p['addr']] + list(path)
+        ident = p['addr'] if 'addr' in p else spi_parts.index(p['cs'])                  # the device's identity in a path: its address, or its slot
+        expect = [machine, ident] + list(path)
         if c.path != expect:
             out.append('%s: the device has it at %s, the spec at %s (%s)' % (code, '/'.join(map(str, c.path)), '/'.join(map(str, expect)),
-                       'machine/address/node' if path is not None else 'machine/row'))
+                       'machine/address/node' if 'addr' in p else 'machine/slot/node'))
         dkind = 'event' if c.notify == 'event' else c.kind
         if dkind != kind: out.append('%s: the device has a %s, the spec\'s %s/%s is a %s' % (code, dkind, p['driver'], node, kind))
         if kind == 'value' and dec is not None and c.scaled != dec: out.append('%s: scaled %d on the device, %d in the spec' % (code, c.scaled, dec))

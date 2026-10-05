@@ -5,6 +5,7 @@
 //   - a short RST pulse (a silent reset: the ID still answers, the configuration is gone): initialised again at once, the row never leaves Alive,
 //     the card is not reported gone
 //   - the SPI reprobe: an ID read twice, Ids on both
+// -DMACHINE runs them with the driver configured by the RC522 machine (examples/spi/src/rc522_machine.h): the same outcomes.
 // Native only. Time is simulated: the poll every 100 ms, the failure edge ticked every 10 ms.
 #include <stdint.h>
 #include <cstdio>
@@ -13,6 +14,9 @@
 #include <oneMachine/fail/world.h>
 #include "../support/mockSpi.h"
 #include "../../examples/spi/src/rc522.h"
+#ifdef MACHINE
+  #include "../../examples/spi/src/rc522_machine.h"   // -DMACHINE: the same scenarios, the driver configured by the RC522 machine
+#endif
 
 using discover::RowId;
 using discover::Sample;
@@ -39,7 +43,11 @@ struct Mode {
 };
 
 struct App;
+#ifdef MACHINE
+using Rfid = rc522m::Machine<App, rc522m::Slot<0>, Mode>::Driver;
+#else
 using Rfid = rc522::Rc522<App, Mode, 1>;
+#endif
 struct App : discover::World<App, mspi::Bus, Chain<CardLog>, Chain<Rfid>, 3, discover::SpiScan, Chain<discover::SpiSlotIds<4>>> {
   static constexpr bool lifecycle = true;
   static void release(RowId) {}

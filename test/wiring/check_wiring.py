@@ -37,7 +37,9 @@ with tempfile.TemporaryDirectory() as hand, tempfile.TemporaryDirectory() as gen
           and facts.straps() == ['D3', 'D4', 'D8'], 'the board, from OneChip\'s Esp8266Pins: %r' % facts.pins)
     check(facts.drivers['rc522']['lines'] == {'cs': 'mcu', 'rst': 'mcu', 'irq': 'device'} and facts.drivers['rc522']['ids'][:2] == (0x91, 0x92)
           and facts.drivers['bmp280']['addrs'] == (0x76, 0x77) and facts.drivers['bmp280']['ids'] == (0x58, 0x60)
-          and facts.drivers['bmp280']['nodes']['ctrl/ctrl_meas'] == ((3, 1), 'reg', None) and facts.buses['i2c'] == {'sda': 'shared', 'scl': 'mcu'},
+          and facts.drivers['bmp280']['nodes']['ctrl/ctrl_meas'] == ((3, 1), 'reg', None) and facts.buses['i2c'] == {'sda': 'shared', 'scl': 'mcu'}
+          and facts.drivers['rc522']['nodes']['card'] == ((0,), 'event', None) and facts.drivers['rc522']['nodes']['rf/rfcfg'] == ((2, 6), 'reg', None)
+          and facts.drivers['rc522']['nodes']['rf/txcontrol'] == ((2, 7), 'reg', None),
           'the manifests, from the drivers: %r' % facts.drivers)
 
     # ---- the rig's spec: sound; its Wiring is the hand-written one, to the description's hash ------------------------------------------------
@@ -47,11 +49,11 @@ with tempfile.TemporaryDirectory() as hand, tempfile.TemporaryDirectory() as gen
     rc, path2 = wiring.build(gen, hdr)
     check(rc == 0 and os.path.basename(path2) == os.path.basename(path) and open(path2).read() == desc,
           'the emitted Wiring builds the same description: %s against %s' % (os.path.basename(path2), os.path.basename(path)))
-    tree = re.sub(r'\s+', '', re.sub(r'//[^\n]*', '', open(os.path.join(ROOT, 'examples', 'spi', 'src', 'air_tree.h')).read()))
+    tree = re.sub(r'\s+', '', re.sub(r'//[^\n]*', '', ''.join(open(os.path.join(ROOT, 'examples', 'spi', 'src', f)).read() for f in ('air_tree.h', 'rfid_tree.h'))))
     rest = lines[lines.index('};') + 1:]
     missing = [l for l in rest if re.sub(r'\s+', '', l) not in tree]
-    check(missing == [], 'the emitted codes and published nodes are air_tree.h\'s: missing %r' % missing)
-    print('emitted Wiring builds description %s, the hand-written one\'s; %d code and node lines, all in air_tree.h' % (os.path.basename(path2), len(rest)))
+    check(missing == [], 'the emitted codes and published nodes are air_tree.h\'s and rfid_tree.h\'s: missing %r' % missing)
+    print('emitted Wiring builds description %s, the hand-written one\'s; %d code and node lines, all in air_tree.h and rfid_tree.h' % (os.path.basename(path2), len(rest)))
 
     # ---- the device built from the same types describes itself by that hash; the build output's description is what the spec wires ----------
     link = StreamLink.popen([sys.argv[1]])
@@ -71,6 +73,8 @@ with tempfile.TemporaryDirectory() as hand, tempfile.TemporaryDirectory() as gen
     check(any(m.startswith('temp: the device has it at 1/118/0, the spec at 0/118/0') for m in d), 'machines in another order: %r' % d)
     d = wiring.diff(variant(raw.replace('temp = "air/temp"\npress = "air/press"', 'press = "air/press"\ntemp = "air/temp"')), facts, desc)
     check(len(d) == 1 and d[0].startswith('codes:'), 'codes in another order: %r' % d)
+    d = wiring.diff(variant(raw.replace('"rfid/gain" = "rfid/rf/rfcfg"', '"rfid/gain" = "rfid/rf/txask"')), facts, desc)
+    check(len(d) == 1 and d[0].startswith('rfid/gain: the device has it at 0/0/2/6, the spec at 0/0/2/4 (machine/slot/node)'), 'the gain on another register: %r' % d)
     swapped = variant(raw.replace('rst = "D4"', 'rst = "D3"').replace('empty_cs = ["D3"]', 'empty_cs = ["D4"]'))
     check(wiring.check(swapped, facts) == [], 'RST on D3 and the empty slot on D4: both the MCU\'s lines, on strap pins: allowed')
     d = wiring.diff(swapped, facts, desc)

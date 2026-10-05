@@ -7,6 +7,7 @@
     m.air.ctrl_meas                                        # 39: read back from the device
     m.changes()                                            # [Change('temp', 27.61, 2761), Change('air', status='stale'), ...]: what changed since the last call
     m.status('air')                                        # 'alive', 'stale' or 'gone': the row the code is bound to (the part's, not a register that reads 0xFF)
+    m.rfid.gain = 7                                        # the RFID reader's receiver gain, bits 6..4 of its RFCfgReg: set by code like the air sensor's
     m.reading('temp')                                      # Reading(value=27.61, status='stale'): never raises; m.temp raises Stale when the part is not alive
     m.missed                                               # how many events the device had to refuse (its event queue was full) since the start
     m.resyncs                                              # how often the device sent every code because a reply was lost
@@ -16,7 +17,8 @@ build output, `Tree(link, descriptions=dir)`, where examples/spi/describe.cpp wr
 -DONEMACHINE_DESC_TEXT sends the text itself).
 A code is a name, with `/` for the part of a group (`air/ctrl_meas` is `m.air.ctrl_meas`). The description lists, per code: its path in the
 machine (`<bus>/<address>/<node>[/<child>]`, for people), whether it notifies (`sync`: a value that moves; `event`), read-only or read-write, its
-kind (a value, a register with its default, a group) and, for a value, how many decimals it is scaled by and the range a set accepts.
+kind (a value, a register with its default, a group) and, for a value, how many decimals it is scaled by and the range a set accepts. A register may be
+a `field` of its device register (bits 6..4: `m.rfid.gain` is 0..7, the other bits of the register are the device's).
 A part that is not alive is Stale or Gone: reading one of its codes raises Stale (it carries the last value), and the change is announced by changes()
 as one status change per code of that part (the device sends it once, through the first of them).
 State and events are told apart. A state code (a value, a register, a row's status) is one pending bit on the device: changes() gets each code
@@ -45,6 +47,7 @@ class Code:
     def __init__(self, num, name, path, notify):
         self.num, self.name, self.path, self.notify = num, name, path, notify
         self.kind, self.ro, self.scaled, self.lo, self.hi, self.default, self.group_size, self.unit, self.status = 'value', True, 0, None, None, None, 0, None, 'alive'
+        self.field = None                     # (high bit, low bit) when the code is a field of its register
         self.src = tuple(path[:2])           # the row it is bound to: <bus>/<address>
     def __repr__(self): return 'Code(%d %s %s%s)' % (self.num, self.name, self.kind, ' ro' if self.ro else ' rw')
     def to_value(self, raw):
@@ -88,7 +91,9 @@ def _parse(text):
         while i < len(w):
             t = w[i]
             if t == 'group': c.kind, c.group_size, i = 'group', int(w[i + 1]), i + 2
-            elif t == 'reg': c.kind, c.default, i = 'reg', int(w[i + 3], 16), i + 4        # reg 0xF4 default 0x57
+            elif t == 'reg': c.kind, i = 'reg', i + 2                                       # reg 0xF4 default 0x57 [field 6..4]
+            elif t == 'default': c.default, i = int(w[i + 1], 16), i + 2
+            elif t == 'field': c.field, i = tuple(int(x) for x in w[i + 1].split('..')), i + 2
             elif t in ('ro', 'rw'): c.ro, i = t == 'ro', i + 1
             elif t == 'value': i += 1
             elif t == 'scaled': c.scaled, i = int(w[i + 1]), i + 2
