@@ -45,15 +45,17 @@ if command -v clang++ >/dev/null; then
   "$OUT/shclang" | tail -1 || rc=1
 fi
 
-echo; echo "=== RC522 interrupt part (spi_irq.cpp): g++ -O2, then ASan/UBSan ==="
-g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $INC spi_irq.cpp -o "$OUT/si"
-"$OUT/si" || rc=1
-g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC spi_irq.cpp -o "$OUT/sisan"
-"$OUT/sisan" | tail -1 || rc=1
-if command -v clang++ >/dev/null; then
-  clang++ -std=c++17 -O2 -Wall -Wextra $INC spi_irq.cpp -o "$OUT/siclang"
-  "$OUT/siclang" | tail -1 || rc=1
-fi
+echo; echo "=== RC522 interrupt part (spi_irq.cpp): fail-fast, -DFALLBACK, -DNOCHECK; g++ -O2, then ASan/UBSan ==="
+for cfg in "" "-DFALLBACK" "-DNOCHECK"; do
+  g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $cfg $INC spi_irq.cpp -o "$OUT/si"
+  echo "[${cfg:-default}] $("$OUT/si")" || rc=1
+  g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $cfg $INC spi_irq.cpp -o "$OUT/sisan"
+  "$OUT/sisan" | tail -1 || rc=1
+  if command -v clang++ >/dev/null; then
+    clang++ -std=c++17 -O2 -Wall -Wextra $cfg $INC spi_irq.cpp -o "$OUT/siclang"
+    "$OUT/siclang" | tail -1 || rc=1
+  fi
+done
 
 echo; echo "=== ESP8266 interrupt delivery (irq_delivery.cpp, host stub): the pins that compile, the ones rejected ==="
 DINC="$INC -I ../support/arduino_stub"
@@ -78,9 +80,19 @@ done
 
 if command -v avr-g++ >/dev/null; then
   echo; echo "=== avr-g++ $(avr-g++ -dumpversion) -Os atmega328p (linked, real SPI core) ==="
-  avr-g++ -std=gnu++17 -Os -mmcu=atmega328p -DF_CPU=16000000UL -ffunction-sections -fdata-sections \
-    -fno-exceptions -fno-rtti -Wall -Wextra $INC -I ../../../OneChip/include avr_spi.cpp -Wl,--gc-sections -o "$OUT/spi.elf" \
+  AVRFL="-std=gnu++17 -Os -mmcu=atmega328p -DF_CPU=16000000UL -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -Wall -Wextra"
+  avr-g++ $AVRFL $INC -I ../../../OneChip/include avr_spi.cpp -Wl,--gc-sections -o "$OUT/spi.elf" \
     && avr-size "$OUT/spi.elf" || { echo "FAIL: the AVR SPI image does not build"; rc=1; }
+  # the driver with no interrupt part is what it was before the interrupt part existed: the same size, to the byte
+  got=$(avr-size "$OUT/spi.elf" | awk 'NR==2{print $1" "$2" "$3}')
+  want=$(cat ../baselines/rc522_noirq_avr.size)
+  if [ "$got" = "$want" ]; then echo "OK: no interrupt part: text/data/bss $got, as before the interrupt part (../baselines/rc522_noirq_avr.size)"
+  else echo "FAIL: no interrupt part: text/data/bss $got, the baseline says $want"; rc=1; fi
+  for v in 1 2; do
+    avr-g++ $AVRFL -DWITH_IRQ=$v $INC -I ../../../OneChip/include avr_spi.cpp -Wl,--gc-sections -o "$OUT/spi_irq$v.elf" \
+      && echo "with the interrupt part ($( [ $v = 1 ] && echo 'sampled line' || echo '+ LineCheck + PollOnLineFault' )): $(avr-size "$OUT/spi_irq$v.elf" | awk 'NR==2{print "text "$1", data "$2", bss "$3}')" \
+      || { echo "FAIL: the AVR image with the interrupt part ($v) does not build"; rc=1; }
+  done
 else
   echo "(avr-g++ not found: AVR build skipped)"
 fi

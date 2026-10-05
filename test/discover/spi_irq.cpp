@@ -5,6 +5,10 @@
 //   - the line is released after every command (ComIEnReg back to IRqInv only, the request cleared), and push-pull is set at init
 //   - the line against the register is a device failure through the failure edge: a line that never fell (Fault, detail 2), one that fell with no
 //     request (Fault, detail 1), a command that never ended (Timeout)
+// Three configurations of the interrupt part, one build each:
+//   (default)    LineCheck, no fallback: the line faults are the chip's as far as the edge is concerned (Recover initialises it)
+//   -DFALLBACK   LineCheck + PollOnLineFault: a line fault is reported as the delivery's and the row polls the register, still reading cards
+//   -DNOCHECK    no check: an unplugged line is not noticed, the commands end by the timeout and the register
 // Native only. Time is simulated.
 #include <stdint.h>
 #include <cstdio>
@@ -46,7 +50,13 @@ struct Mode {
   template<typename E> using DevStack = fail::Controller<E, fail::TickPart<fail::Retry<2>>, fail::Recover, fail::DetectError,
     fail::HoldOp<fail::Coalesce>, fail::Gate<50>, fail::TickPart<fail::Reprobe<500, 120>>, fail::LazyStatus>;
   template<typename Impl, typename W> using Access = fail::SpiAccess<Impl, W>;
+#if defined(FALLBACK)
+  using Irq = rc522::Interrupt<MockLine, Seen, rc522::LineCheck, rc522::PollOnLineFault>;
+#elif defined(NOCHECK)
   using Irq = rc522::Interrupt<MockLine, Seen>;
+#else
+  using Irq = rc522::Interrupt<MockLine, Seen, rc522::LineCheck>;
+#endif
 };
 
 struct App;
@@ -57,6 +67,7 @@ struct App : discover::World<App, mspi::Bus, Chain<CardLog>, Chain<Rfid>, 3, dis
   static void unbindAll() {}
 };
 using Ticker = fail::Ticks<App, App::DriverList>;
+using Services = fail::Services<App, App::DriverList>;
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { ++failures; std::printf("FAIL line %d: %s\n", __LINE__, #c); } } while (0)
@@ -139,6 +150,7 @@ int main() {
   CHECK(CardLog::n == 1);
 
   // ---- a command that never ends: nothing before the timeout, then a Timeout through the edge ------------------
+#ifndef NOCHECK
   start(true);
   rc.stall = true;
   App::pump();
@@ -149,9 +161,67 @@ int main() {
   Rfid::service(1, t0 + rc522::Interrupt<MockLine>::timeoutMs);
   CHECK(!inFlight() && Seen::n == 1 && Seen::last.failed() && Seen::last.kind() == fail::Kind::Timeout);
   CHECK(Rfid::failStatus(1).fails >= 1 && uint8_t(Rfid::failStatus(1).lastKind) == uint8_t(fail::Kind::Timeout));
-  CHECK(st().inits == 2);                             // Recover initialised the chip again
+  CHECK(st().inits == 2);                             // Recover initialised the chip again: the chip's fault, with or without a fallback
   CHECK(CardLog::n == 0);
+#endif
 
+  // ---- the services fold reaches every row of the driver ---------------------------------------------------------------
+  start(true);
+  App::pump();
+  CHECK(inFlight());
+  for (uint32_t t = 0; inFlight() && t < 200; ++t, ++now) Services::run(now);
+  CHECK(!inFlight() && CardLog::n == 1);
+
+#if defined(FALLBACK)
+  // ---- the line never fell (not connected): the row falls back to polling the register and keeps reading ------------
+  start(true);
+  rc.lineFault = 1;
+  App::pump();
+  CHECK(inFlight() && !rc.line());
+  Rfid::service(1, now);                              // not asserted: waits for the timeout
+  CHECK(inFlight());
+  Rfid::service(1, now + rc522::Interrupt<MockLine>::timeoutMs);
+  CHECK(!inFlight());                                 // the rest of that poll ran by the register
+  CHECK(CardLog::n == 1 && CardLog::log[0] == 0xDEADBEEFu);   // and the card was read
+  CHECK(Seen::last.failed() && Seen::last.kind() == fail::Kind::Fault && Seen::last.detail == rc522::LineCheck::missed);   // what the check found
+  const fail::FailStatus fb = Rfid::failStatus(1);
+  CHECK(fb.fails == 1 && uint8_t(fb.lastKind) == uint8_t(fail::Kind::Refused) && fb.lastDetail == rc522::LineCheck::missed);   // what the edge heard
+  CHECK(fb.recovers == 0 && st().inits == 1 && App::reg.status(1) == Status::Alive);                                            // the chip was left alone
+  const uint32_t seenBefore = Seen::n;
+  for (int i = 0; i < 40; ++i) { App::pump(); Rfid::service(1, now); now += 100; }   // from now on the poll is inline: no flapping, no further reports
+  CHECK(!inFlight() && Seen::n == seenBefore && Rfid::failStatus(1).fails == 1 && Rfid::failStatus(1).recovers == 0);
+  CHECK(App::reg.status(1) == Status::Alive && st().inits == 1 && CardLog::n == 1);
+  State::card.present = false;
+  for (int i = 0; i < 3; ++i) { App::pump(); }
+  CHECK(CardLog::n == 2 && CardLog::log[1] == 0);     // the departure is seen by the register polling too
+  State::card.present = true; State::card.ready = false;
+  App::pump();
+  CHECK(CardLog::n == 3 && CardLog::log[2] == 0xDEADBEEFu);   // and the arrival
+  // a chip initialised again tests the line again: still unplugged, it falls back again, reported once more
+  Rfid::reinit(1);
+  App::pump();
+  CHECK(inFlight());
+  Rfid::service(1, now); Rfid::service(1, now + rc522::Interrupt<MockLine>::timeoutMs);
+  CHECK(!inFlight() && Rfid::failStatus(1).fails == 2 && Rfid::failStatus(1).recovers == 0);
+
+  // ---- the line fell with no request (stuck low): the same fallback, detail 1 ------------------------------
+  start(true);
+  rc.stall = true; rc.lineFault = 2;
+  App::pump();
+  Rfid::service(1, now);                              // asserted: finished at once
+  CHECK(!inFlight());
+  CHECK(uint8_t(Rfid::failStatus(1).lastKind) == uint8_t(fail::Kind::Refused) && Rfid::failStatus(1).lastDetail == rc522::LineCheck::spurious);
+  CHECK(Rfid::failStatus(1).recovers == 0 && st().inits == 1);
+#elif defined(NOCHECK)
+  // ---- no check: an unplugged line is not noticed; the command ends by the timeout and the register -----------------
+  start(true);
+  rc.lineFault = 1;
+  App::pump();
+  CHECK(inFlight());
+  for (int i = 0; i < 4 && inFlight(); ++i) { Rfid::service(1, now); now += rc522::Interrupt<MockLine>::timeoutMs; Rfid::service(1, now); }
+  CHECK(!inFlight() && CardLog::n == 1 && CardLog::log[0] == 0xDEADBEEFu);
+  CHECK(Rfid::failStatus(1).fails == 0 && Rfid::failStatus(1).recovers == 0 && st().inits == 1);
+#else
   // ---- the line never fell though the register shows the answer (not connected): Fault, detail 2 ----------------
   start(true);
   rc.lineFault = 1;
@@ -162,6 +232,7 @@ int main() {
   Rfid::service(1, now + rc522::Interrupt<MockLine>::timeoutMs);
   CHECK(!inFlight() && Seen::last.failed() && Seen::last.kind() == fail::Kind::Fault && Seen::last.detail == rc522::LineCheck::missed);
   CHECK(Rfid::failStatus(1).fails >= 1 && uint8_t(Rfid::failStatus(1).lastKind) == uint8_t(fail::Kind::Fault));
+  CHECK(Rfid::failStatus(1).recovers >= 1 && st().inits == 2);   // fail-fast: Recover initialised the chip
   CHECK(CardLog::n == 0);                             // the poll ended: no card is claimed on a line that disagrees
 
   // ---- the line fell and the register shows no request (stuck low): Fault, detail 1 ------------------------
@@ -171,6 +242,7 @@ int main() {
   CHECK(inFlight());
   Rfid::service(1, now);                              // asserted: finished at once, no timeout wait
   CHECK(!inFlight() && Seen::last.failed() && Seen::last.kind() == fail::Kind::Fault && Seen::last.detail == rc522::LineCheck::spurious);
+#endif
 
   if (failures) { std::printf("FAILED: %d\n", failures); return 1; }
   std::printf("OK: RC522 interrupt part native\n");

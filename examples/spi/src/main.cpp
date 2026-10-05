@@ -4,11 +4,11 @@
 //   RC522    SCK D5, MISO D6, MOSI D7, SDA (its CS) D8, RST D4 (held high here) or 3V3, IRQ D0, 3V3, GND
 //   BMP280   SDA D2, SCL D1, 3V3, GND (CSB high or open: I2C mode)
 // Slot 1 (D3) is declared with nothing on it: the scan reports it empty.
-// D0 (GPIO16) is the RC522's IRQ input. A poll starts its command and returns; the loop finishes it (Rfid::service) when the
+// D0 (GPIO16) is the RC522's IRQ input. A poll starts its command and returns; the loop finishes it (fail::Services) when the
 // line is asserted, or after 40 ms, so nothing in the loop waits for the reader. The ESP8266 has no interrupt on GPIO16, so the
 // line is sampled (irq::Sampled); where the pin has one, irq::IsrFlag sets a flag in the ISR instead. The chip drives the line
 // (push-pull, active low); ComIrqReg then tells RxIRq (a card answered) from TimerIRq (none did), and a line that disagrees with
-// the register is a device failure. Not on a boot strapping pin (D3, D4, D8): the RC522 keeps its state across a reset of the
+// the register is reported to the failure edge, and the row then polls the register instead (rc522::PollOnLineFault). Not on a boot strapping pin (D3, D4, D8): the RC522 keeps its state across a reset of the
 // board and a pending request would hold the line low at the next boot.
 //
 // Line format: <ms> <name>[<row>]=<value>   a card's UID in hex when one arrives, 0 when it leaves (after 3 polls
@@ -87,14 +87,7 @@ struct IrqCounters {
       if (!cnt[i]) { vals[i] = irq; cnt[i] = 1; return; }
     }
   }
-  static void report(uint32_t now) {
-    Serial.print(F("IRQ ")); Serial.print(now);
-    Serial.print(F(" rx=")); Serial.print(rx); Serial.print(F(" tmo=")); Serial.print(tmo);
-    Serial.print(F(" spurious=")); Serial.print(spurious); Serial.print(F(" missed=")); Serial.print(missed);
-    Serial.print(F(" none=")); Serial.print(none);
-    for (uint8_t i = 0; i < 8 && cnt[i]; ++i) { Serial.print(F(" 0x")); Serial.print(vals[i], HEX); Serial.print(':'); Serial.print(cnt[i]); }
-    Serial.println();
-  }
+  static void report(uint32_t now);   // below: it reads the reader's row
 };
 
 struct RfidApp;
@@ -105,7 +98,7 @@ struct RfidMode {
   template<typename E> using DevStack = fail::Controller<E, fail::TickPart<fail::Retry<2>>, fail::Recover, fail::DetectError,
     fail::HoldOp<fail::Coalesce>, fail::Gate<50>, fail::TickPart<fail::Reprobe<500, 120>>, fail::LazyStatus>;
   template<typename Impl, typename W> using Access = fail::SpiAccess<Impl, W>;
-  using Irq = rc522::Interrupt<irq::Sampled<16>, IrqCounters>;   // D0
+  using Irq = rc522::Interrupt<irq::Sampled<16>, IrqCounters, rc522::LineCheck, rc522::PollOnLineFault>;   // D0
 };
 using Rfid = rc522::Rc522<RfidApp, RfidMode, 1>;
 using RfidDrivers = discover::DriversIn<Chain<Rfid>>;
@@ -118,6 +111,22 @@ struct RfidApp : discover::World<RfidApp, Spi, Chain<Printer>, Chain<Rfid>, 3, d
   using Health = fail::HealthT<RfidApp, RfidDrivers, 3, rc522::HealthCfg>;
 };
 using RfidTicker = fail::Ticks<RfidApp, RfidDrivers>;
+using RfidServices = fail::Services<RfidApp, RfidDrivers>;
+
+inline void IrqCounters::report(uint32_t now) {
+  Serial.print(F("IRQ ")); Serial.print(now);
+  Serial.print(F(" rx=")); Serial.print(rx); Serial.print(F(" tmo=")); Serial.print(tmo);
+  Serial.print(F(" spurious=")); Serial.print(spurious); Serial.print(F(" missed=")); Serial.print(missed);
+  Serial.print(F(" none=")); Serial.print(none);
+  for (uint8_t i = 0; i < 8 && cnt[i]; ++i) { Serial.print(F(" 0x")); Serial.print(vals[i], HEX); Serial.print(':'); Serial.print(cnt[i]); }
+  if (RfidApp::reg.count > 1) {   // what the failure edge heard of the reader's row
+    const fail::FailStatus f = Rfid::failStatus(1);
+    Serial.print(F(" | edge fails=")); Serial.print(f.fails); Serial.print(F(" recovers=")); Serial.print(f.recovers);
+    Serial.print(F(" last=")); Serial.print(f.lastKind); Serial.print('/'); Serial.print(f.lastDetail);
+  }
+  Serial.println();
+}
+
 constexpr uint8_t rstPin = 2;    // D4: the RC522's RST
 struct AirApp  : discover::World<AirApp, Twi, Chain<Printer>, bmp::Entries<AirApp>, 3, discover::I2cScan> {};
 
@@ -229,7 +238,7 @@ void loop() {
   LoopStats::lap(micros());
   const uint32_t now = millis();
   faults(now);
-  if (RfidApp::reg.count > 1) { const uint32_t t = micros(); Rfid::service(1, now); LoopStats::note(LoopStats::maxSvc, t); }
+  { const uint32_t t = micros(); RfidServices::run(now); LoopStats::note(LoopStats::maxSvc, t); }
   if (int32_t(now - nextCard) >= 0) {
     nextCard = now + 100;
     { const uint32_t t = micros(); RfidApp::pump(); LoopStats::note(LoopStats::maxPump, t); }
