@@ -16,12 +16,12 @@
 //
 // Never touch a node from a static initialiser: discover, set, publish, sync. A machine's nodes are objects with constructors of their own, held in
 // inline static members of a class template, and those are initialised in no defined order: a static initialiser that runs discovery writes into a
-// node before its constructor has run, and the constructor then wipes what was written (the captured registers, the Watch copies). Discover from
+// node before its constructor has run, and the constructor then wipes what was written (what the registers want, the Watch copies). Discover from
 // setup() or main().
 // describe() walks the machine and the published nodes and writes what a consumer needs: the codes, their path, their fields, which notify.
 //
 // What is specific to this device and what is not: Machine<W, Criteria, Mode> (the nodes, the registers' defaults, the identity hash, the driver) is the
-// BMP280's. PathRef, Published/PublishedAt, the register mimic (Reg), Capture/RestoreEnd, Limits, the description walk and the status of a machine's row
+// BMP280's. PathRef, Published/PublishedAt, the register mimic (Reg), Reconcile, Limits, the description walk and the status of a machine's row
 // are written against a machine and not this one; they stay here until a second device is described the same way (the RC522, as a machine), which will
 // show which of them are the framework's and which are this machine's. tree_ops.h, the link's ops over the published nodes, is in the same position.
 #pragma once
@@ -33,6 +33,7 @@
 #include <oneMachine/discover/identify.h>
 #include <oneMachine/state/face.h>
 #include <oneMachine/fail/devedge.h>
+#include <oneMachine/discover/manifest.h>
 
 namespace bmpm {
 
@@ -40,6 +41,18 @@ namespace bmpm {
   using oneMenu::ItemDef;
   using oneMenu::MenuDef;
   using oneMenu::StaticBody;
+
+  // ---- the manifest: what the part needs and publishes (discover/manifest.h) -------------------------------------------------------
+  // On I2C, at 0x76 or 0x77 (its SDO pin), with chip id 0x58 (BMP280) or 0x60 (BME280, the same registers here). No lines of its own: only the bus's.
+  // What it publishes is its machine's Nodes (Machine<...>::Nodes): a description walk lists them.
+  struct Manifest {
+    static constexpr const char* name = "bmp280";
+    static constexpr const char* bus = "i2c";
+    static constexpr uint8_t addrs[] = {0x76, 0x77};
+    static constexpr uint8_t ids[] = {0x58, 0x60};
+    template<typename F> static constexpr void pins(F&&) {}
+    static constexpr bool at(uint8_t a) { return a == addrs[0] || a == addrs[1]; }
+  };
 
   // ---- the Criteria: which device a machine is -----------------------------------------------------------------------------------
   template<uint8_t A> struct Addr { static constexpr uint8_t addr = A; };
@@ -56,22 +69,21 @@ namespace bmpm {
   // Via: the PathRef it reaches the node by (void: an ItemRef)
   template<typename Code, typename Node, typename Via = void> struct PubTag { template<typename O> struct Part : O { using O::O; using PubCode = Code; using Inner = Node; using Path = Via; }; };
 
-  // ---- capture and restore (D20, D22, D13) -------------------------------------------------------------------------------------
-  // The tail of the restore chain: every component that restores calls Base::restore() after its own, and this ends it.
-  struct RestoreEnd { template<typename O> struct Part : O { using O::O; void restore() {} void forget() {} }; };
-  // Keeps the last set() and replays it on restore(), then calls the tail. A set while the device is gone is captured too: the last intent is what
-  // comes back. forget() drops it (a part that is not the one that was here).
-  struct Capture {
+  // ---- desired and observed: one Reconcile part (OneMachine Redrawn, experiment 3; replaces Capture, its restore chain and the defaults as init) ---
+  // The register holds what is wanted of it (`want`), from the start: its default (RegAt's regDef, below it in the composition). set() changes what is
+  // wanted and writes it; a set while the device is gone changes it too: the last intent is what comes back. apply() writes what is wanted (a part
+  // that came back, validated; the first init); reset() makes the default what is wanted again (another part, D13/D22). The driver's canary compares
+  // the register it reads back with desired(): a part reset behind the host's back no longer holds it.
+  struct Reconcile {
     template<typename O> struct Part : O {
       using Base = O;
       using O::O;
       using Type = typename Base::Type;
-      Type last{}; bool have = false;
-      void set(Type v) { last = v; have = true; Base::set(v); }
-      void restore() { if (have) Base::set(last); Base::restore(); }
-      void forget() { have = false; Base::forget(); }
-      [[nodiscard]] bool known() const { return have; }
-      [[nodiscard]] Type captured() const { return last; }
+      Type want = Type(Base::regDef);
+      void set(Type v) { want = v; Base::set(v); }
+      void apply() { Base::set(want); }
+      void reset() { want = Type(Base::regDef); }
+      [[nodiscard]] Type desired() const { return want; }
     };
   };
 
@@ -94,6 +106,7 @@ namespace bmpm {
   template<typename W, typename Criteria = Addr<0x76>, typename Mode = Plain>
   struct Machine {
     static constexpr uint8_t addr = Criteria::addr;
+    static_assert(Manifest::at(Criteria::addr), "a BMP280/BME280 answers at 0x76 or 0x77 (its SDO pin)");
     // the device: its data and its register access. Static, as the machine is.
     struct Dev {
       static constexpr uint8_t addr = Criteria::addr;
@@ -101,7 +114,7 @@ namespace bmpm {
       inline static Cal     cal{};                  // device constants
       inline static uint32_t ident = 0;             // the part that was here: a hash of its chip id and calibration
       inline static bool    known = false;          //   (ident is set)
-      inline static uint16_t restored = 0, defaulted = 0;   // how often it came back and its captured state was replayed / the defaults were used
+      inline static uint16_t restored = 0, defaulted = 0;   // how often it came back and what was wanted was applied again / the defaults were used
 
       static void rdN(uint8_t reg, uint8_t* out, uint8_t n) {
         using Twi = typename W::Twi;
@@ -124,7 +137,7 @@ namespace bmpm {
 
     // a register mimic: get() reads the chip, set() writes it
     template<uint8_t A> struct RegSrc { static uint8_t get() { return Dev::rd(A); } static void set(uint8_t v) { Dev::wr(A, v); } };
-    template<typename Tag, uint8_t A, uint8_t Def> using Reg = ItemDef<Capture, oneData::DataFn<RegSrc<A>>, RegAt<A, Def>, Limits<0, 255>, Label<Tag>, RestoreEnd>;
+    template<typename Tag, uint8_t A, uint8_t Def> using Reg = ItemDef<Reconcile, oneData::DataFn<RegSrc<A>>, RegAt<A, Def>, Limits<0, 255>, Label<Tag>>;
 
     using Temp  = ItemDef<Scaled<2>, Label<TagTemp>,  oneData::ReadOnly<oneData::Watch<oneData::DataRef<&Dev::temp>>>>;
     using Press = ItemDef<Scaled<2>, Label<TagPress>, oneData::ReadOnly<oneData::Watch<oneData::DataRef<&Dev::press>>>>;
@@ -170,12 +183,11 @@ namespace bmpm {
     // ---- the registers of the control group, in order -------------------------------------------------------------------------
     template<typename F> static void eachReg(F&& fn) { for (uint8_t i = 0; i < Ctrl::Body::size(); ++i) ctrl.body.visit(i, fn); }
 
-    // ---- restore: capture replayed in composition order, and the defaults as the init (D13, D20, D22, D33) -----------------------
-    // restore(): each register writes its captured value, then calls the tail. forget(): the captured values are dropped (not the part that was here).
-    // restoreDefaults(): each register is set to its default, which captures it: restore from defaults is the device init.
-    static void restore() { eachReg([](auto& r) { r.restore(); }); }
-    static void forget() { eachReg([](auto& r) { r.forget(); }); }
-    static void restoreDefaults() { eachReg([](auto& r) { using R = std::remove_reference_t<decltype(r)>; r.set(R::regDef); }); }
+    // ---- what is wanted of the registers, in order (D13, D22: the defaults are the init) ---------------------------------------------
+    // apply(): each register gets what is wanted of it. reset(): the defaults are what is wanted (another part). restoreDefaults(): both.
+    static void apply() { eachReg([](auto& r) { r.apply(); }); }
+    static void reset() { eachReg([](auto& r) { r.reset(); }); }
+    static void restoreDefaults() { reset(); apply(); }
 
     // ---- which part is it: a hash of its chip id and its calibration (a replaced part has its own) -------------------------------
     static uint32_t identOf(uint8_t id, const uint8_t* c) {
@@ -192,7 +204,7 @@ namespace bmpm {
     }
 
     // The device is found, or is back (after it was gone, or lost its configuration). Validate: the same chip id and calibration as the part that was
-    // here. Validated, the captured state is replayed; not validated (a different part, or the first time), the slot is dropped and the defaults are
+    // here. Validated, what was wanted is applied again; not validated (a different part, or the first time), the slot is dropped and the defaults are
     // the init. The calibration is device data, read again every time.
     enum class How : uint8_t { Defaults, Restored };
     static How bring() {
@@ -200,14 +212,12 @@ namespace bmpm {
       bool ok = false;
       for (uint8_t i = 0; i < 5 && !(ok = Dev::readCal(c)); ++i) {}
       const uint32_t h = ok ? identOf(Dev::rd(0xD0), c) : 0;
-      if (ok && Dev::known && h == Dev::ident) {
-        setCal(c); restore(); ++Dev::restored;
-        return How::Restored;
-      }
-      forget();
+      const bool same = ok && Dev::known && h == Dev::ident;
       if (ok) setCal(c); else Dev::cal = Cal{};      // no calibration: poll() produces nothing
-      Dev::ident = h; Dev::known = ok;
-      restoreDefaults(); ++Dev::defaulted;
+      if (!same) { reset(); Dev::ident = h; Dev::known = ok; }
+      apply();
+      if (same) { ++Dev::restored; return How::Restored; }
+      ++Dev::defaulted;
       return How::Defaults;
     }
 
@@ -262,14 +272,14 @@ namespace bmpm {
     }
 
     // ---- discovery: the machine is the driver's one device ----------------------------------------------------------------
-    // Under a failure edge (Mode::checked) each poll first reads the control registers back: a register that no longer holds what was captured
+    // Under a failure edge (Mode::checked) each poll first reads the control registers back: a register that no longer holds what is wanted of it (desired())
     // means the part was reset without the host knowing (Corrupt: Recover calls reinit(), which validates it and replays the capture). A part that
     // stops answering is Absent, retried and probed; when it answers again the edge calls reinit() the same way.
     struct Driver : discover::DriverBase<Driver, W>, fail::DevEdge<Driver, W, Mode, 1> {
       using B = discover::DriverBase<Driver, W>;
       using Edge = fail::DevEdge<Driver, W, Mode, 1>;
       static constexpr bool polled = true;
-      static constexpr uint8_t addrLo = Criteria::addr, addrHi = Criteria::addr, idReg = 0xD0, id = 0x58;
+      static constexpr uint8_t addrLo = Criteria::addr, addrHi = Criteria::addr, idReg = 0xD0, id = Manifest::ids[0];
       static constexpr uint8_t recoverMask = fail::bit(fail::Kind::Corrupt);
       static constexpr bool reinitOnBusReturn = true;     // a bus that comes back may have taken the part's supply: validate it again
       static void init(RowId) { Machine::init(); }
@@ -285,7 +295,7 @@ namespace bmpm {
             if (!o.isOk() || lost) return;
             uint8_t v = 0;
             o = Edge::checkedRead(row, R::regAddr, &v, 1);
-            if (o.isOk() && r.known() && v != r.captured()) { lost = true; which = R::regAddr; }
+            if (o.isOk() && v != r.desired()) { lost = true; which = R::regAddr; }
           });
           if (!o.isOk()) return o;
           if (lost) return fail::Outcome::Fail(fail::Kind::Corrupt, which);
@@ -300,7 +310,7 @@ namespace bmpm {
     };
     // the BME280 answers 0x60 at the same register: a second entry, the same driver
     using UseBmp = discover::Use<discover::Own, Driver>;
-    using UseBme = discover::Use<discover::IdProbe<0xD0, 0x60, Criteria::addr, Criteria::addr>, Driver>;
+    using UseBme = discover::Use<discover::IdProbe<0xD0, Manifest::ids[1], Criteria::addr, Criteria::addr>, Driver>;
     using Entries = hapi::Chain<UseBmp, UseBme>;
 
     // ---- the index of a node in the machine -------------------------------------------------------------------------------
@@ -317,8 +327,8 @@ namespace bmpm {
   template<typename Code, typename Node, Node& ref, typename... Notify>
   using Published = ItemDef<Notify..., oneMenu::ItemRef<Node, ref>, Label<Code>, PubTag<Code, Node>>;
 
-  template<typename T, typename = void> struct HasCaptured : std::false_type {};
-  template<typename T> struct HasCaptured<T, std::void_t<decltype(std::declval<T&>().captured())>> : std::true_type {};
+  template<typename T, typename = void> struct HasDesired : std::false_type {};
+  template<typename T> struct HasDesired<T, std::void_t<decltype(std::declval<T&>().desired())>> : std::true_type {};
 
   // a node of a machine by compile-time path: P is the position in the machine, then in each group below it. It reaches any node, a leaf of
   // a group too, by resolving the path to the node's singleton (or to the child inside a group) on use. get(), changed() and sync() are the node's.
@@ -334,7 +344,7 @@ namespace bmpm {
       static Node& ref() { return M::template resolve<P...>(); }
       static decltype(auto) get() { return ref().get(); }
       // the value of a part that is not Alive: a register's last set (the intent that comes back), otherwise the last value read
-      static decltype(auto) last() { if constexpr (HasCaptured<Node>::value) return ref().captured(); else return ref().get(); }
+      static decltype(auto) last() { if constexpr (HasDesired<Node>::value) return ref().desired(); else return ref().get(); }
       [[nodiscard]] static bool changed() { return ref().changed(); }
       static void sync() { ref().sync(); }
       template<typename V> static void set(V&& v) { ref().set(std::forward<V>(v)); }      // through the node: its limits, its capture, its register
@@ -413,6 +423,47 @@ namespace bmpm {
     static const char* statusName(uint8_t st) { return st == 0 ? "alive" : st == 1 ? "stale" : "gone"; }
     template<typename M, typename... Pub> void publishedAll(hapi::Chain<Pub...>*, uint8_t bus) { (published<M, Pub>(bus), ...); }
   };
+
+  // ---- the description's hash: the same lines as Walk, without the status, by a walk of its own that folds at compile time -------------------
+  // Walk is the text the device sends (-DONEMACHINE_DESC_TEXT, and the log); HashWalk is what the hash is folded from and what the build output
+  // holds (examples/spi/describe.cpp prints it). They are two walks so the text build stays what it was; describe.cpp refuses to write a file whose
+  // text does not hash to the fold, and test/link/check_tree.py checks the text build's description against that file, so they cannot drift apart.
+  struct Fnv { uint32_t h = 2166136261u; constexpr void operator()(char c) { h = state::fnv(h, uint8_t(c)); } };
+  template<typename P> struct HashWalk {
+    P& put;
+    constexpr void str(const char* s) { while (*s) put(*s++); }
+    constexpr void name(state::Name n) { for (unsigned i = 0; n.at(i); ++i) put(n.at(i)); }
+    constexpr void dec(uint32_t v) { char b[10] = {}; unsigned k = 0; do { b[k++] = char('0' + v % 10); v /= 10; } while (v); while (k) put(b[--k]); }
+    constexpr void hex(uint8_t v) { const uint8_t hi = uint8_t(v >> 4), lo = uint8_t(v & 15); put('0'); put('x'); put(char(hi < 10 ? '0' + hi : 'A' + hi - 10)); put(char(lo < 10 ? '0' + lo : 'A' + lo - 10)); }
+    template<typename N> constexpr void fields() {
+      if constexpr (IsGroup<N>::value) { str(" group "); dec(N::Body::size()); }
+      else if constexpr (HasReg<N>::value) { str(" reg "); hex(N::regAddr); str(" default "); hex(N::regDef); str(HasSet<N>::value ? " rw" : " ro");
+        if constexpr (HasLimits<N>::value) { str(" range "); dec(uint32_t(N::limLo)); str(".."); dec(uint32_t(N::limHi)); } }
+      else if constexpr (HasConst<N>::value) { str(" const "); hex(N::constAddr); str(" ["); dec(N::constLen); put(']'); }
+      else { str(HasSet<N>::value ? " rw" : " ro"); str(" value"); if constexpr (HasDecimals<N>::value) { str(" scaled "); dec(N::decimals); } }
+    }
+    template<typename... N> constexpr void nodes(hapi::Chain<N...>*) { unsigned i = 0; ((str("  #"), dec(i++), put(' '), name(N::label()), fields<N>(), put('\n')), ...); }
+    template<typename... R> constexpr void regs(hapi::Chain<R...>*) { unsigned i = 0; ((str("    #"), dec(i++), put(' '), name(R::label()), fields<R>(), put('\n')), ...); }
+    template<typename M> constexpr void machine() {
+      str("machine "); name(TagBmp::name()); str(" at "); hex(M::addr); put('\n');
+      nodes(static_cast<typename M::Nodes*>(nullptr));
+      regs(static_cast<typename M::Ctrl::Body::Types*>(nullptr));
+    }
+    template<typename M, typename Pub> constexpr void published(uint8_t bus) {
+      using Inner = typename Pub::Inner;
+      str("  "); name(Pub::PubCode::name()); str(" -> "); dec(bus); put('/'); dec(M::addr);
+      if constexpr (std::is_void<typename Pub::Path>::value) { put('/'); dec(unsigned(M::template IndexOf<Inner, typename M::Nodes>::value)); }
+      else for (unsigned i = 0; i < Pub::Path::depth; ++i) { put('/'); dec(Pub::Path::path[i]); }
+      str(NotifiesSync<Pub>::value ? " notify sync" : " silent"); fields<Inner>(); put('\n');
+    }
+    template<typename M, typename... Pub> constexpr void publishedAll(hapi::Chain<Pub...>*, uint8_t bus) { (published<M, Pub>(bus), ...); }
+  };
+  template<typename M, typename Pubs, typename P> constexpr void describeStatic(P& put, uint8_t bus) {
+    HashWalk<P> w{put};
+    w.template machine<M>();
+    w.str("published\n");
+    w.template publishedAll<M>(static_cast<Pubs*>(nullptr), bus);
+  }
 
   // M: the machine (its Criteria is the device's identity in the path); Pubs: Chain<published nodes>; bus: the machine's position in the App
   template<typename M, typename Pubs, typename P> void describe(P& put, uint8_t bus) {

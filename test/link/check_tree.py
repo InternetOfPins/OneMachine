@@ -4,9 +4,10 @@ a reset behind the host's back, an unplug with a set while it is gone, the notif
 import os, struct, sys
 D = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(D, '..', '..', 'python'))
-from onemachine import Tree, StreamLink, CtypesLink, OutOfRange, ReadOnly, UnknownCode, Stale, Reading, Change
+from onemachine import Tree, StreamLink, CtypesLink, OutOfRange, ReadOnly, UnknownCode, Stale, Reading, Change, LinkError
 
 CTYPES = len(sys.argv) > 1 and sys.argv[1] == 'ctypes'
+DESC = sys.argv[2] if len(sys.argv) > 2 else None        # where the build wrote the description by hash (examples/spi/describe.cpp)
 failures = 0
 def check(cond, what):
     global failures
@@ -18,7 +19,23 @@ def op(c, payload=b''):
 def advance(ms): check(op('t', struct.pack('<I', ms))[0] == 0, 'advance')
 def reg(a): return op('R', bytes([a]))[1][0]
 
-m = Tree(link)
+st, d = op('d')
+HASHED = d.startswith(b'hash ')
+if HASHED:
+    check(len(d) == 5 + 8 + 1 + 6 + 1 and d.endswith(b'000000\n'), 'd by hash: the hash and six statuses, %d bytes: %r' % (len(d), d))
+    try: Tree(link); check(False, 'a device described by hash, and no description directory')
+    except LinkError as e: check('-DONEMACHINE_DESC_TEXT' in str(e) and d[5:13].decode() in str(e), 'a readable error: %s' % e)
+m = Tree(link, descriptions=DESC)
+def key(name):                                           # a code in a raw request: its number under the hash, or its name (the text build)
+    return struct.pack('<IB', m.hash, m.codes[name].num) if HASHED else name.encode()
+if HASHED: check(m.description == open(os.path.join(DESC, d[5:13].decode() + '.txt')).read(), 'the text is the build output\'s')
+if not HASHED and DESC:                                  # the two walks: the text the device sends, without its statuses, is the build output's
+    import re
+    files = [f for f in os.listdir(DESC) if re.fullmatch(r'[0-9a-f]{8}\.txt', f)]      # <hash>.txt (facts.txt is beside it)
+    static = '\n'.join(re.sub(r' status (alive|stale|gone)$', '', l) for l in m.description.split('\n'))
+    built = open(os.path.join(DESC, files[0])).read()
+    built = built[:built.index('wiring ')] if 'wiring ' in built else built      # the wiring lines are the build output's only (the text build is Round 6's)
+    check(len(files) == 1 and static == built, 'the text walk and the hash walk write the same description')
 check(list(m.codes) == ['temp', 'press', 'air', 'air/config', 'air/ctrl_meas', 'card'], 'the codes, in the device\'s order: %s' % list(m.codes))
 check(m.codes['temp'].scaled == 2 and m.codes['temp'].notify == 'sync' and m.codes['temp'].ro, 'temp: scaled 2, notifies, read-only')
 check(m.codes['air'].kind == 'group' and m.codes['air'].group_size == 2, 'air is a group of 2')
@@ -55,15 +72,20 @@ for bad, exc in ((300, OutOfRange), (-1, OutOfRange)):
     try: m.air.ctrl_meas = bad; check(False, 'range %r' % bad)
     except exc: pass
 check(reg(0xF4) == 0x27, 'refused here: nothing was sent')
-st, _ = op('w', struct.pack('<i', 300) + b'air/ctrl_meas'); check(st == 3 and reg(0xF4) == 0x27, 'the device refuses it too (BadValue) and keeps the value')
+st, _ = op('w', struct.pack('<i', 300) + key('air/ctrl_meas')); check(st == 3 and reg(0xF4) == 0x27, 'the device refuses it too (BadValue) and keeps the value')
 try: m.temp = 1; check(False, 'temp is read-only')
 except ReadOnly: pass
 try: m.air = 1; check(False, 'air is a group')
 except AttributeError: pass
 try: m.nothing; check(False, 'unknown code')
 except UnknownCode: pass
-st, _ = op('w', struct.pack('<i', 1) + b'temp'); check(st == 0x82, 'a set of a read-only code: the device answers ReadOnly')
-st, _ = op('v', b'nope'); check(st == 0x80, 'an unknown code: Unknown')
+st, _ = op('w', struct.pack('<i', 1) + key('temp')); check(st == 0x82, 'a set of a read-only code: the device answers ReadOnly')
+st, _ = op('v', struct.pack('<IB', m.hash, 6) if HASHED else b'nope'); check(st == 0x80, 'an unknown code: Unknown')
+if HASHED:                                               # a number is valid only under the hash it was read with; names are not codes here
+    st, _ = op('v', struct.pack('<IB', m.hash ^ 1, 0)); check(st == 1, 'another build\'s hash: BadHash (%d)' % st)
+    st, _ = op('w', struct.pack('<i', 0x27) + struct.pack('<IB', m.hash ^ 1, 4)); check(st == 1 and reg(0xF4) == 0x27, 'a set under another hash: BadHash, nothing written')
+    st, _ = op('v', b'temp'); check(st == 2, 'a name, by hash: BadLength (%d)' % st)
+    st, d = op('v', key('temp')); check(st == 0 and len(d) == 5, 'temp by its number: status and value')
 
 # ---- a reset behind the host's back: the last setting comes back ---------------------------------------------------------------
 op('x'); check(reg(0xF4) == 0x00, 'the chip lost its settings')
@@ -81,6 +103,7 @@ check(sorted(x.code for x in ch if x.status == 'stale') == ['air', 'air/config',
 check(len([x for x in ch if x.status]) == 5, 'and only once')
 check(m.status('air') == 'stale' and m.status('temp') == 'stale' and m.status('card') == 'alive', 'stale for the part, alive for the card')
 check(m.status('air', refresh=True) == 'stale', 'and the device says so')
+m.refresh(); check(m.codes['temp'].status == 'stale' and m.codes['card'].status == 'alive', 'the description read again carries the statuses now (by hash too)')
 try: m.temp; check(False, 'temp of a stale part raises')
 except Stale as e: check(e.status == 'stale' and e.last == t_before, 'Stale carries the status and the last value: %r' % e.last)
 try: m.air.ctrl_meas; check(False, 'a register of a stale part raises')
@@ -102,7 +125,7 @@ op('z', bytes([2])); advance(20)
 ch = m.changes()
 check([x for x in ch if x.status] == [Change('card', status='gone')] and m.status('card') == 'gone' and m.status('air') == 'alive', 'the card\'s row gone: %r' % ch)
 op('z', bytes([0])); advance(20); m.changes()
-st, d = op('v', b'card'); check(st == 4 and d == bytes([0]), 'an event has no value: NoValue and the status alone')
+st, d = op('v', key('card')); check(st == 4 and d == bytes([0]), 'an event has no value: NoValue and the status alone')
 
 # ---- the card: an event with a value ------------------------------------------------------------------------------------------
 m.changes()
@@ -118,5 +141,32 @@ check(len(ch) == 8 and [x.value for x in ch] == list(range(1, 9)), 'the oldest 8
 check(m.missed - before == 4, 'and the 4 refused are counted: %d' % (m.missed - before))
 check(m.changes() == [] and m.missed - before == 4, 'the count is told once')
 
-print('FAILED: %d' % failures if failures else 'OK: python Tree over %s' % ('ctypes' if CTYPES else 'a pipe'))
+# ---- a burst of state changes: one record per code, with the latest value; events in the same burst are still queued and counted -------
+m.changes(); before = m.missed
+for i in range(100):
+    op('S', struct.pack('<II', 415148, 519888 + 16 * (i + 1))); advance(100)             # a new temperature at every poll
+    if i % 8 == 0: op('k', struct.pack('<I', 0x100 + i))                               # 13 cards in the same burst
+latest = m.raw('temp')
+ch = m.changes()
+temps = [x for x in ch if x.code == 'temp']
+check(len(temps) == 1 and temps[0].raw == latest, '100 temp changes: one record, the latest value %r: %r' % (latest, temps))
+check([x.code for x in ch if x.code != 'card'] == ['temp', 'press'], 'state: temp and press once each: %r' % [x.code for x in ch])
+cards = [x.value for x in ch if x.code == 'card']
+check(cards == [0x100 + 8 * k for k in range(8)] and m.missed - before == 5, 'events: the oldest 8 cards kept, the 5 refused counted: %r, %d' % (cards, m.missed - before))
+check(m.changes() == [], 'nothing since')
+
+# ---- a lost reply: the consumer asks with an older sequence number, and the device sends every code ------------------------------------
+seq0 = m._seq
+op('S', struct.pack('<II', 415148, 519888)); advance(200)
+st, data = op('n', struct.pack('<H', seq0))                                              # a reply the consumer never sees
+check(st == 0 and len(data) > 4, 'an answer that is lost')
+r0 = m.resyncs
+ch = m.changes()                                                                         # still asks since seq0: the device answered since
+check(m.resyncs == r0 + 1, 'the device saw the lost reply: resync')
+check(sorted({x.code for x in ch if x.status is None}) == ['air/config', 'air/ctrl_meas', 'press', 'temp']
+      and {x.code: x.raw for x in ch if x.status is None}['temp'] == m.raw('temp'), 'every code with a value, as it is now: %r' % ch)
+check(sorted(x.code for x in ch if x.status == 'alive') == ['air', 'air/config', 'air/ctrl_meas', 'card', 'press', 'temp'], 'and every row\'s status')
+check(m.changes() == [] and m.resyncs == r0 + 1, 'then in step again')
+
+print('FAILED: %d' % failures if failures else 'OK: python Tree over %s, description %s' % ('ctypes' if CTYPES else 'a pipe', 'by hash' if HASHED else 'as text'))
 sys.exit(1 if failures else 0)

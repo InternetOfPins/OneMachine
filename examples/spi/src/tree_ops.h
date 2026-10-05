@@ -1,19 +1,30 @@
 // The link's ops over the published nodes of a machine tree. The framing and the bytes are role/link.h's: this is an App with payload ops
 // (`payload = true`: role::Link calls describe() for op 'd' and request() for the others).
-//   'd'  the description: bmpm::describe's text, then the codes that only notify (Extra). Codes are numbered in the order they are listed; each line
-//        ends with the status of the row the code is bound to (alive, stale or gone) as it is now.
-//   'v'  get by code           payload: the code (text)                       reply: the status (u8), then the value (i32 little-endian)
+//   'd'  the description, by its hash (the default): `hash <8 hex digits>\n` then one digit per code, the status of the row it is bound to now
+//        (0 alive, 1 stale, 2 gone), then `\n`. The hash is FNV-1a over the description's text without the status, computed at compile time
+//        (bmpm::HashWalk, Extra::describeStatic); the consumer has the text from the build (examples/spi/describe.cpp writes <hash>.txt; python: Tree(link, descriptions=dir)).
+//        With -DONEMACHINE_DESC_TEXT: the text itself, bmpm::describe's walk then the codes that only notify (Extra), each line ending with the
+//        status of its row. Codes are numbered in the order they are listed.
+//   'v'  get by code           payload: the code: u32 the description's hash and u8 the code's number (by hash, the default; BadHash when the hash
+//                              is not this build's), or its name (text, -DONEMACHINE_DESC_TEXT)                       reply: the status (u8), then the value (i32 little-endian)
 //        The status is the device's: Alive 0, Stale 1, Gone 2. A part that is not Alive has no live value: a register answers the last value set (its
 //        capture, the intent that comes back), a sensor value the last one measured. A group or an event has no value: the status alone, with NoValue.
-//   'w'  set by code           payload: the value (i32), then the code        reply: nothing; the set goes through the node: its limits, its capture,
+//   'w'  set by code           payload: the value (i32), then the code (as for 'v')        reply: nothing; the set goes through the node: its limits, its capture,
 //                                                                              its register (a part that is gone keeps it as the last intent)
-//   'n'  changes since         payload: none                                  reply: u8 how many were refused since the last 'n', then per change
-//                                                                              the code's number (u8) and its value (i32); a number with bit 7 set
-//                                                                              is a status change: the code that stands for its row, and the new status
+//   'n'  changes since         payload: u16 the sequence number the consumer   reply: u16 the sequence number now, u8 flags (bit 0 resync: the
+//                              got from its last 'n' (0 at the start)           consumer's number is not the one last answered, so every code is
+//                                                                              sent; bit 1 more: call again), u8 how many events were refused
+//                                                                              since the last 'n', then records of 5 bytes: u8 (kind << 6 | code
+//                                                                              number), i32. Kind 0..2: a state code as it is now, the status of
+//                                                                              its row (Alive 0, Stale 1, Gone 2) and its value (0 for a group);
+//                                                                              kind 3: one occurrence of an event code, oldest first.
 //   status  Ok, BadLength, BadValue (outside the node's limits), NoValue, ReadOnly, Unknown (no such code or op)
-// What changed is told by the published nodes' OnSync/OnChange functions (note(code number, value)) and by watch() (a row's status): into a
-// fail::Buffer<N>, a store that refuses the newest when it is full and counts the refusal. The consumer is told how many it missed (the u8 in the
-// reply) and reads the values it follows again.
+// State and events are kept apart (OneMachine Redrawn, experiment 1). A state code has one pending bit (StateChanges): its value moved, or the status
+// of its row did (the code that stands for the row); either sets the bit and counts the machine's sequence number. 'n' sends each code whose bit is
+// set with its status and value as they are when the reply is made, and clears the bit. A burst of changes is one record with the latest value: state cannot overflow. An event code (the
+// card) has a queue, fail::Buffer<N>, that refuses the newest when full and counts the refusal (the u8 in the reply).
+// The sequence number is what makes a lost reply safe: a consumer that did not get the last reply asks with an older number, and the device then
+// sends every code (resync): every bit is set, and the reply is made as any other.
 #pragma once
 #include <stdint.h>
 #include <hapi/hapi.h>
@@ -23,7 +34,7 @@
 
 namespace bmpm {
 
-  // the changes waiting to be read: a Buffer of N records under a status that counts what it refused
+  // the events waiting to be read: a Buffer of N records under a status that counts what it refused
   template<uint8_t N = 8>
   struct ChangeQueue {
     struct Env {
@@ -38,7 +49,20 @@ namespace bmpm {
     inline static Q q;
     inline static uint8_t seenDrops = 0;
     static void note(uint8_t code, int32_t v) { (void)q.offer(fail::Rec{code, 0, v}); }
-    static void noteStatus(uint8_t code, uint8_t st) { note(uint8_t(0x80 | code), st); }
+  };
+
+  // the state codes that changed since the last 'n': one bit per code (its value or its row's status moved), and the machine's sequence number
+  // (every change counts it; `served` is the number the last reply carried). Up to N codes.
+  template<uint8_t N = 8>
+  struct StateChanges {
+    static constexpr uint8_t bytes = uint8_t((N + 7) / 8);
+    inline static uint8_t bits[bytes] = {};
+    inline static uint16_t seq = 0, served = 0;
+    static void mark(uint8_t code) { bits[code >> 3] |= uint8_t(1u << (code & 7)); ++seq; }
+    static void note(uint8_t code, int32_t) { mark(code); }   // the shape of an OnSync function's call: the value is read when the reply is made
+    static void fill(uint8_t n) { for (uint8_t i = 0; i < bytes; ++i) bits[i] = n >= 8 * (i + 1) ? 0xFF : n > 8 * i ? uint8_t((1u << (n - 8 * i)) - 1) : 0; }
+    static bool take(uint8_t code) { const uint8_t m = uint8_t(1u << (code & 7)); if (!(bits[code >> 3] & m)) return false; bits[code >> 3] &= uint8_t(~m); return true; }
+    static bool any() { for (uint8_t b : bits) if (b) return true; return false; }
   };
 
   // a code carries its number (`static constexpr uint8_t num`), the one the change records use; the numbers are the codes' positions in the list
@@ -66,8 +90,23 @@ namespace bmpm {
     static constexpr uint8_t numCodes = uint8_t(numPubs + Extra::Codes::size);
     static constexpr bool payload = true;
     using Queue = ChangeQueue<N>;
+    using State = StateChanges<>;
+    static_assert(numCodes <= 8, "StateChanges<> holds 8 codes: give it more (a record has room for 64)");
 
-    template<typename P> static void describe(P& put) { bmpm::describe<M, Pubs>(put, Bus); Extra::describe(put); }
+    // the description's hash: its static text (bmpm::describeStatic, then Extra::describeStatic), folded at compile time
+    static constexpr uint32_t hash() { bmpm::Fnv f; bmpm::describeStatic<M, Pubs>(f, Bus); Extra::describeStatic(f); return f.h; }
+    template<typename P> static void describe(P& put) {
+#ifdef ONEMACHINE_DESC_TEXT
+      bmpm::describe<M, Pubs>(put, Bus); Extra::describe(put);
+#else
+      constexpr uint32_t descHash = hash();   // a constant: the walk is not in the image
+      put('h'); put('a'); put('s'); put('h'); put(' ');
+      for (int i = 28; i >= 0; i -= 4) { const uint8_t d = uint8_t((descHash >> i) & 15); put(char(d < 10 ? '0' + d : 'a' + d - 10)); }
+      put('\n');
+      for (uint8_t c = 0; c < numCodes; ++c) put(char('0' + status(c)));
+      put('\n');
+#endif
+    }
 
     // the code in the payload, against each code tag's name: true when it is that code
     template<typename Code> static bool named(const uint8_t* s, uint16_t n) {
@@ -89,6 +128,19 @@ namespace bmpm {
       const int p = findPub(static_cast<Pubs*>(nullptr), s, n);
       return p >= 0 ? p : findExtra(static_cast<typename Extra::Codes*>(nullptr), s, n);
     }
+
+    // ---- a code in a request ------------------------------------------------------------------------------------------------
+#ifndef ONEMACHINE_DESC_TEXT
+    // by its number, under the description's hash: u32 the hash (little-endian), u8 the number. A number is valid only under the hash it was read
+    // with: a consumer holding another build's description is refused (BadHash). The names are in the build output only, not in the image.
+    static int code(const uint8_t* s, uint16_t n, uint8_t& err) {
+      constexpr uint32_t mine = hash();
+      if (n != 5) { err = role::LinkBadLength; return -1; }
+      if ((uint32_t(s[0]) | uint32_t(s[1]) << 8 | uint32_t(s[2]) << 16 | uint32_t(s[3]) << 24) != mine) { err = role::LinkBadHash; return -1; }
+      if (s[4] >= numCodes) { err = role::LinkUnknown; return -1; }
+      return s[4];
+    }
+#endif
 
     // ---- status: the row a code is bound to ---------------------------------------------------------------------------
     template<typename Pub> static uint8_t statusOne() {
@@ -115,7 +167,7 @@ namespace bmpm {
       for (uint8_t c = 0; c < numCodes; ++c) {
         if (rep(c) != c) continue;
         const uint8_t s = status(c);
-        if (seeded && s != last[c]) Queue::noteStatus(c, s);
+        if (seeded && s != last[c]) State::mark(c);
         last[c] = s;
       }
       seeded = true;
@@ -158,8 +210,14 @@ namespace bmpm {
       static Pubs* const list = nullptr;
       switch (op) {
         case 'v': {
-          const int at = find(in, n);
+#ifdef ONEMACHINE_DESC_TEXT
+          const int at = find(in, n);                      // by its name: the text build, whose consumer has the names from 'd'
           if (at < 0) { r.status(role::LinkUnknown); return; }
+#else
+          uint8_t err = role::LinkUnknown;
+          const int at = code(in, n, err);
+          if (at < 0) { r.status(err); return; }
+#endif
           const uint8_t st = status(at);
           int32_t v = 0;
           const uint8_t ls = at < numPubs ? get(list, at, v, st) : role::LinkNoValue;
@@ -169,16 +227,29 @@ namespace bmpm {
         case 'w': {
           if (n < 5) { r.status(role::LinkBadLength); return; }
           const int32_t v = int32_t(uint32_t(in[0]) | uint32_t(in[1]) << 8 | uint32_t(in[2]) << 16 | uint32_t(in[3]) << 24);
+#ifdef ONEMACHINE_DESC_TEXT
           const int at = find(in + 4, uint16_t(n - 4));
           if (at < 0) { r.status(role::LinkUnknown); return; }
+#else
+          uint8_t err = role::LinkUnknown;
+          const int at = code(in + 4, uint16_t(n - 4), err);
+          if (at < 0) { r.status(err); return; }
+#endif
           r.status(at < numPubs ? set(list, at, v) : role::LinkReadOnly);
           return;
         }
         case 'n': {
+          if (n != 2) { r.status(role::LinkBadLength); return; }
+          const uint8_t resync = uint16_t(in[0] | (in[1] << 8)) != State::served;   // the consumer missed the last reply: every code
+          if (resync) State::fill(numCodes);
           auto& q = Queue::q;
           const uint8_t drops = q.status().drops;
-          r.status(role::LinkOk); r.put(uint8_t(drops - Queue::seenDrops)); Queue::seenDrops = drops;
-          while (!q.empty() && unsigned(r.n) + 5 <= sizeof r.data) { const fail::Rec& c = q.front(); r.put(c.cap); r.put32(c.v); q.pop(); }
+          r.status(role::LinkOk); r.put(0); r.put(0); r.put(0); r.put(uint8_t(drops - Queue::seenDrops)); Queue::seenDrops = drops;
+          for (uint8_t c = 0; c < numCodes && unsigned(r.n) + 5 <= sizeof r.data; ++c)
+            if (State::take(c)) { const uint8_t st = status(c); int32_t v = 0; if (c < numPubs) (void)get(list, c, v, st); r.put(uint8_t(st << 6 | c)); r.put32(v); }
+          while (!q.empty() && unsigned(r.n) + 5 <= sizeof r.data) { const fail::Rec& e = q.front(); r.put(uint8_t(0xC0 | e.cap)); r.put32(e.v); q.pop(); }
+          State::served = State::seq;
+          r.data[0] = uint8_t(State::seq); r.data[1] = uint8_t(State::seq >> 8); r.data[2] = uint8_t(resync | ((State::any() || !q.empty()) << 1));
           return;
         }
         default: r.status(role::LinkUnknown); return;

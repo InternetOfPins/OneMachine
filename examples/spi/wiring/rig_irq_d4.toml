@@ -1,0 +1,39 @@
+# The rig with the RC522's IRQ on D4 (GPIO2, a boot strap pin): it must not build. RST moves to D3, the empty slot goes.
+# python3 -m onemachine.wiring check examples/spi/wiring/rig_irq_d4.toml
+# TOML, not the essay's YAML: Python reads it with the standard library (tomllib).
+board = "wemos-d1-mini"          # its pins: OneChip's chips/esp8266/esp8266Device.h (D0..D8 and what each one is)
+
+[i2c]
+sda = "D2"
+scl = "D1"
+hz = 100000
+
+[spi]
+sck = "D5"
+miso = "D6"
+mosi = "D7"
+hz = 4000000
+empty_cs = []
+
+# The App's machines, in order: a code's path starts with its machine's position (rfid 0, air 1).
+[parts.rfid]
+driver = "rc522"
+bus = "spi"
+cs = "D8"
+rst = "D3"                       # moved off D4 for the IRQ
+irq = { pin = "D4", mode = "push-pull", delivery = "sampled" }
+
+[parts.air]
+driver = "bmp280"
+bus = "i2c"
+addr = 0x76
+accept = [0x58, 0x60]            # BMP280, BME280
+
+# What the App publishes: code = "part/node", in the order the device numbers them
+[publish]
+temp = "air/temp"
+press = "air/press"
+air = "air/ctrl"
+"air/config" = "air/ctrl/config"
+"air/ctrl_meas" = "air/ctrl/ctrl_meas"
+card = "rfid/card"

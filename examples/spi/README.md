@@ -27,6 +27,9 @@ Wemos D1 mini (ESP8266), everything at 3.3V.
 
 Slot 1 is D3 (GPIO0) with nothing on it: the scan reports it empty.
 
+D8 (GPIO15) must be low when the board resets. An RC522 module can hold its SDA line high at that moment, and the ESP8266 then
+boots from SDIO ("boot mode:(7,x)", "waiting for host") and runs nothing. Put a 10k resistor in series in the D8 to SDA wire.
+
 D0 (GPIO16) is the RC522's IRQ input (push-pull, active low, set by the driver). A poll starts its command and returns; the
 loop's `fail::Services` step finishes it when the line is asserted, or after 40 ms, so nothing in the loop waits for the reader. The
 ESP8266 has no interrupt on GPIO16, so the line is sampled (`irq::Sampled<16>`); on a pin that has one, `irq::IsrFlag<Pin>` sets a
@@ -73,10 +76,12 @@ m.changes()                                            # [Change('temp', 27.61, 
 m.status('air')                                        # 'alive', 'stale' or 'gone': the part's row; m.temp raises Stale when it is not alive
 ```
 
-Ops: `d` the description (each code with the status of its row), `v` get by code (the status first, then the value; a part that is not alive answers its last value), `w` set by code (through the node: its limits, its capture, its register), `n` the changes since the last `n` (a value, or a status change of a row), `f` one
-fault key (`x` resets the air sensor behind the host's back, `v` and `p` reset the RFID reader). The changes wait in a `fail::Buffer` of 8: when a consumer
-does not read for a while the newest are refused and counted, and the reply of `n` says how many it missed (`m.missed`); read the values again with
-`m.temp`. `examples/spi/rig_session.py` is a session on the real board; `test/link/build.sh` runs the same consumer against a simulated one.
+Ops: `d` the description by its hash and each code's status (the text is in the build output: `.pio/build/<env>/description/<hash>.txt`, written by `describe.py` from the same types, `src/air_tree.h`; give it as `Tree(link, descriptions=...)`; env `d1_mini_link_text` sends the text itself), `v` get by code (the code is its number under the description's hash, u32 hash then u8 number, or its name in the text build; the status first, then the value; a part that is not alive answers its last value), `w` set by code (through the node: its limits, its capture, its register), `n` the changes since the sequence number of the last reply (state codes once each with their value now, a row's status, and the events), `f` one
+fault key (`x` resets the air sensor behind the host's back, `v` and `p` reset the RFID reader). State and events are kept apart: a state code
+(temp, press, a register, a row's status) is one pending bit, so a consumer that does not read for a while gets each code once with its latest value
+and nothing is lost; the card is an event and waits in a `fail::Buffer` of 8: when it is full the newest are refused and counted (`m.missed`). A reply
+that is lost is seen by its sequence number, and the next one carries every code (`m.resyncs`).
+`examples/spi/rig_session.py` is a session on the real board; `test/link/build.sh` runs the same consumer against a simulated one.
 
 ## Build and flash
 
@@ -113,6 +118,9 @@ first three bytes (cascade level 1 only).
   answering goes Stale, is probed, and is initialised again when it answers; one that was reset without the sketch
   knowing (its configuration read back is gone) is initialised again at once. `test/discover/spi_fail.cpp` runs both
   against the register model with RST driven. `HealthT` is not composed here.
+- A part that goes Gone (retries and probes spent) is looked for again every 5 s at its declared address, by the same entries
+  (`World::reviveGone()`, enabled by `revive = true` in the app): when it answers it takes its row again, its init runs, and the
+  value it was wanted to hold is written back. `test/discover/revive.cpp` runs it on the mock bus.
 - The BMP280 on I2C has no failure edge: a supply disturbance that resets it leaves it in sleep mode, silent.
 
 ## Faults

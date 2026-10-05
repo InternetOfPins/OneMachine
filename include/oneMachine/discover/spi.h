@@ -32,6 +32,8 @@ namespace discover {
     static_assert(((V != 0x00 && V != 0xFF) && ...),
                   "an SPI id of 0x00 or 0xFF is what an empty slot reads: it cannot identify a device");
     static constexpr bool has(uint8_t v) { return ((v == V) || ...); }
+    static constexpr uint8_t list[] = {V...};          // in order, for a manifest
+    static constexpr unsigned count = sizeof...(V);
   };
 
   template<uint8_t S> struct AtSlot { static constexpr uint8_t slot = S; };
@@ -89,6 +91,8 @@ namespace discover {
       if (bus != rootRow) return;   // an SPI bus has no bridges: one root, its slots
       Run<Self, Entries>::all(bus);
     }
+    // the slot of a row that went Gone, looked at again by the same entries
+    template<typename Self, typename Entries> static void revive(RowId bus, uint8_t slot) { Run<Self, Entries>::one(slot, bus); }
 
   private:
     template<typename Self, typename L> struct Run;
@@ -104,6 +108,11 @@ namespace discover {
           const bool fixed = ((fixedSlotOf<E>() == slot) || ...);
           (void)(tryEntry<E>(slot, bus, fixed) || ...);
         }
+      }
+
+      static void one(uint8_t slot, RowId bus) {
+        const bool fixed = ((fixedSlotOf<E>() == slot) || ...);
+        (void)(tryEntry<E>(slot, bus, fixed) || ...);
       }
 
       template<typename X> static bool tryEntry(uint8_t slot, RowId bus, bool fixed) {

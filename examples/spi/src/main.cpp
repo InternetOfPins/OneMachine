@@ -47,6 +47,7 @@
   #include "tree_ops.h"   // the link's ops over the published nodes (role/link.h with payload ops)
 #endif
 #include "bmp280_machine.h"
+#include "air_tree.h"   // the codes and the published nodes (shared with the description generator, ../describe.cpp)
 
 #ifndef BUILD_REV
   #define BUILD_REV "unknown"   // set by ../version.py: each repo's git commit
@@ -54,6 +55,13 @@
 
 // What the sketch says about itself goes to Log: the serial monitor. In the link build (env d1_mini_link, -DONEMACHINE_LINK) the serial port carries
 // the link's frames instead (role/link.h), and the log says nothing.
+// The link build by hash (d1_mini_link): its log goes nowhere, and the codes' names are in the build output only (describe.py), so the log lines that
+// carry names are left out of it, and the names with them. The text build (d1_mini_link_text) and the build without the link keep them.
+#if defined(ONEMACHINE_LINK) && !defined(ONEMACHINE_DESC_TEXT)
+  #define SPI_LOG_NAMES 0
+#else
+  #define SPI_LOG_NAMES 1
+#endif
 #ifdef ONEMACHINE_LINK
 struct NullPrint : Print { size_t write(uint8_t) override { return 1; } size_t write(const uint8_t*, size_t n) override { return n; } };
 static NullPrint nullPrint;
@@ -66,17 +74,11 @@ using discover::RowId;
 using hapi::Chain;
 namespace esp = hw::esp8266;
 
-using Twi = esp::Esp8266TwiMaster<4, 5, 100000>;                                      // SDA D2, SCL D1
-using Spi = hapi::APIOf<oneBus::SpiAPI, oneBus::SpiSlots<esp::OutPin<15>, esp::OutPin<0>>,   // slot 0 D8, slot 1 D3
+using Twi = esp::Esp8266TwiMaster<airTree::Wiring::sda, airTree::Wiring::scl, 100000>;                                      // SDA D2, SCL D1
+using Spi = hapi::APIOf<oneBus::SpiAPI, oneBus::SpiSlots<esp::OutPin<airTree::Wiring::rfidCs>, esp::OutPin<airTree::Wiring::emptyCs>>,   // slot 0 D8, slot 1 D3
                         oneBus::SpiMaster<4000000>, esp::Esp8266SpiCore>;
 
-// The codes the App publishes (the numbers are the codes' positions in the description: the link's change records use them)
-struct CodeTemp     { static constexpr uint8_t num = 0; ONEMACHINE_STATE_NAME(name, "temp"); };
-struct CodePress    { static constexpr uint8_t num = 1; ONEMACHINE_STATE_NAME(name, "press"); };
-struct CodeAir      { static constexpr uint8_t num = 2; ONEMACHINE_STATE_NAME(name, "air"); };
-struct CodeConfig   { static constexpr uint8_t num = 3; ONEMACHINE_STATE_NAME(name, "air/config"); };
-struct CodeCtrlMeas { static constexpr uint8_t num = 4; ONEMACHINE_STATE_NAME(name, "air/ctrl_meas"); };
-struct CodeCard     { static constexpr uint8_t num = 5; ONEMACHINE_STATE_NAME(name, "card"); };
+using airTree::CodeTemp; using airTree::CodePress; using airTree::CodeCard;   // the codes the App publishes: air_tree.h
 
 #ifdef ONEMACHINE_LINK
 // the card, as a change the link can read: its UID when it arrives, 0 when it leaves
@@ -138,7 +140,7 @@ struct RfidMode {
   template<typename E> using DevStack = fail::Controller<E, fail::TickPart<fail::Retry<2>>, fail::Recover, fail::DetectError,
     fail::HoldOp<fail::Coalesce>, fail::Gate<50>, fail::TickPart<fail::Reprobe<500, 120>>, fail::LazyStatus>;
   template<typename Impl, typename W> using Access = fail::SpiAccess<Impl, W>;
-  using Irq = rc522::Interrupt<irq::Sampled<16>, IrqCounters, rc522::LineCheck, rc522::PollOnLineFault>;   // D0
+  using Irq = rc522::Interrupt<irq::Sampled<airTree::Wiring::rfidIrq>, IrqCounters, rc522::LineCheck, rc522::PollOnLineFault>;   // D0
 };
 using Rfid = rc522::Rc522<RfidApp, RfidMode, 1>;
 using RfidDrivers = discover::DriversIn<Chain<Rfid>>;
@@ -150,7 +152,7 @@ using RfidConsumers = Chain<Printer>;
 struct RfidApp : discover::World<RfidApp, Spi, RfidConsumers, Chain<Rfid>, 3, discover::SpiScan,
                                  Chain<discover::SpiSlotIds<Spi::slots>>>,
                  fail::DeviceOwnStale<RfidApp, RfidDrivers> {
-  static constexpr bool lifecycle = true;
+  static constexpr bool lifecycle = true, revive = true;
   static void release(RowId) {}
   static void unbindAll() {}
   using Health = fail::HealthT<RfidApp, RfidDrivers, 3, rc522::HealthCfg>;
@@ -172,7 +174,7 @@ inline void IrqCounters::report(uint32_t now) {
   Log.println();
 }
 
-constexpr uint8_t rstPin = 2;    // D4: the RC522's RST
+constexpr uint8_t rstPin = airTree::Wiring::rfidRst;    // D4: the RC522's RST
 // The air sensor under failure handling: a bus edge and, per device, retry, recover (the part was reset without the host knowing), probe.
 struct AirMode {
   static constexpr bool checked = true, returnPath = false, idempotent = true, lifecycle = true;
@@ -182,10 +184,10 @@ struct AirMode {
     fail::HoldOp<fail::Coalesce>, fail::Gate<50>, fail::TickPart<fail::Reprobe<500, 120>>, fail::LazyStatus>;
 };
 struct AirApp;
-using Bmp = bmpm::Machine<AirApp, bmpm::Addr<0x76>, AirMode>;   // the sensor at 0x76: its Criteria
+using Bmp = airTree::Machine<AirApp, AirMode>;   // the sensor at 0x76: its Criteria
 using AirDrivers = Chain<Bmp::Driver>;
 struct AirApp : discover::World<AirApp, Twi, Chain<>, Bmp::Entries, 3, discover::I2cScan>, fail::BusEdge<AirApp, AirDrivers, 1, AirMode> {
-  static constexpr bool lifecycle = true;
+  static constexpr bool lifecycle = true, revive = true;
   static void release(RowId) {}
   static void unbindAll() {}
   static void busReset() { Twi::begin(); }
@@ -196,6 +198,7 @@ using AirTicker = fail::Ticks<AirApp, AirDrivers>;
 // call say<code, decimals>(value) when they change (the sync pass in loop()); air is the control group and ctrl_meas a register of it, silent.
 // Each reaches its node by a compile-time path into the machine (PathRef<Bmp, 3, 1> is node #3, child #1).
 template<typename Code, uint8_t Decimals> static void say(int32_t v) {
+#if SPI_LOG_NAMES
   Log.print(millis()); Log.print(' '); for (unsigned i = 0, c; (c = Code::name().rom(i)); ++i) Log.print(char(c)); Log.print('=');
   int32_t p = 1; for (uint8_t i = 0; i < Decimals; ++i) p *= 10;
   if (v < 0) Log.print('-');
@@ -204,17 +207,14 @@ template<typename Code, uint8_t Decimals> static void say(int32_t v) {
   const int32_t frac = a % p;
   for (int32_t q = p / 10; q > frac && q > 1; q /= 10) Log.print('0');
   Log.println(frac);
+#endif
 #ifdef ONEMACHINE_LINK
-  bmpm::ChangeQueue<8>::note(Code::num, v);   // and for the consumer that reads changes over the link
+  bmpm::StateChanges<>::mark(Code::num);   // and for the consumer that reads changes over the link: a pending bit, the value is read when it asks
 #endif
 }
-using PubTemp  = bmpm::PublishedAt<CodeTemp,  bmpm::PathRef<Bmp, 0>, oneData::OnSync<&say<CodeTemp, 2>>>;
-using PubPress = bmpm::PublishedAt<CodePress, bmpm::PathRef<Bmp, 1>, oneData::OnSync<&say<CodePress, 2>>>;
-using PubAir   = bmpm::PublishedAt<CodeAir,   bmpm::PathRef<Bmp, 3>>;
-using PubConfig   = bmpm::PublishedAt<CodeConfig,   bmpm::PathRef<Bmp, 3, 0>>;   // the leaves of the group, by their paths
-using PubCtrlMeas = bmpm::PublishedAt<CodeCtrlMeas, bmpm::PathRef<Bmp, 3, 1>>;
-using Published = Chain<PubTemp, PubPress, PubAir, PubConfig, PubCtrlMeas>;
-constexpr uint8_t airBus = 1;   // the air sensor's bus is the App's second machine: its path codes start with 1
+template<typename Code> struct Say { static constexpr auto fn = &say<Code, 2>; };
+using Published = airTree::Pubs<Bmp, Say>;   // temp, press, air, air/config, air/ctrl_meas (air_tree.h)
+constexpr uint8_t airBus = airTree::bus;
 
 struct SerialPut { void operator()(char c) { Log.write(c); } };
 
@@ -227,9 +227,11 @@ template<typename A> static void table(const __FlashStringHelper* bus) {
 
 // the machine and what is published of it, for a consumer: a row's address is its identity in the path
 static void describe() {
+#if SPI_LOG_NAMES
   if (AirApp::reg.count < 2) return;
   SerialPut put;
   bmpm::describe<Bmp, Published>(put, airBus);
+#endif
 }
 
 // the air sensor's row: a status change, and each time it came back (its captured state replayed, or the defaults because it was another part)
@@ -346,11 +348,12 @@ struct Extra {   // a code that only notifies: the card (an event with a value, 
   using Codes = Chain<CodeCard>;
   static uint8_t status(uint8_t) { return RfidApp::reg.count > 1 ? uint8_t(RfidApp::reg.status(1)) : 2; }
   template<typename P> static void describe(P& put) {
-    const char* s = "  card -> 0/1 notify event ro value u32 status "; while (*s) put(*s++);
+    const char* s = AIRTREE_CARD_TEXT; while (*s) put(*s++);
     const uint8_t st = status(0);
     s = st == 0 ? "alive" : st == 1 ? "stale" : "gone"; while (*s) put(*s++);
     put('\n');
   }
+  template<typename P> static constexpr void describeStatic(P& put) { airTree::describeStatic(put); }
 };
 using Ops = bmpm::TreeOps<Bmp, Published, Extra, airBus, 8>;
 struct SerialOut { static void put(uint8_t b) { Serial.write(b); } };
@@ -413,6 +416,8 @@ void loop() {
   logAir();
   logHealth();
   if (int32_t(now - nextAir)  >= 0) { nextAir  = now + 1000; AirApp::pump(); bmpm::PublishAll<Published>::sync(); }
+  static uint32_t nextRevive = 5000;   // a part that went Gone is looked for again, at its declared address, every 5 s
+  if (int32_t(now - nextRevive) >= 0) { nextRevive = now + 5000; RfidApp::reviveGone(); AirApp::reviveGone(); }
   static uint32_t nextIrq = 5000;
   if (int32_t(now - nextIrq) >= 0) { nextIrq = now + 5000; IrqCounters::report(now); LoopStats::report(now); }
 }

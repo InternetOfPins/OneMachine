@@ -13,10 +13,25 @@
 #include <oneMachine/fail/devedge.h>
 #include <oneMachine/fail/spiaccess.h>
 #include <oneMachine/fail/health.h>
+#include <oneMachine/discover/manifest.h>
 
 namespace rc522 {
 
   using discover::RowId;
+
+  // ---- the manifest: what the part needs and publishes (discover/manifest.h) -------------------------------------------------------
+  // On SPI; found by VersionReg among these ids (v1.0, v2.0, then the common clones: FM17522 and others). Its own lines: CS and RST, which the MCU
+  // drives, and IRQ, which the chip drives (push-pull, active low) and keeps asserted across a reset of the board when a request is pending.
+  // It publishes one event, the card.
+  using Ids = discover::IdSet<0x91, 0x92, 0x88, 0x12, 0xB2>;
+  struct Manifest {
+    static constexpr const char* name = "rc522";
+    static constexpr const char* bus = "spi";
+    using Id = Ids;
+    struct Pins { static constexpr discover::Drive cs = discover::Drive::Mcu, rst = discover::Drive::Mcu, irq = discover::Drive::Device; };
+    template<typename F> static constexpr void pins(F&& f) { f("cs", Pins::cs); f("rst", Pins::rst); f("irq", Pins::irq); }
+    static constexpr const char* event = "card";
+  };
 
   // a card's UID, cascade level 1, first byte in the high byte; 0 when the card leaves
   struct Card { using Value = uint32_t; static constexpr uint8_t id = 20, decimals = 0; static constexpr const char* name = "card"; };
@@ -144,7 +159,7 @@ namespace rc522 {
     static constexpr uint32_t spiHz   = 4000000;   // the chip takes 10 MHz; 4 is kind to jumper wires
     static constexpr uint8_t  spiMode = 0;
     static constexpr uint8_t  idCmd   = uint8_t((VersionReg << 1) | 0x80);
-    using Ids = discover::IdSet<0x91, 0x92, 0x88, 0x12, 0xB2>;   // v1.0, v2.0, then the common clones (FM17522 and others)
+    using Ids = rc522::Ids;   // the manifest's
 
     // what the poll found: the card in the field and the errors seen on the way (a BCC mismatch is a corrupt UID)
     // initTries: on which write of the configuration it read back (0: it never did)

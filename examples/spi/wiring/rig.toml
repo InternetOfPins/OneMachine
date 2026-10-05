@@ -1,0 +1,39 @@
+# The rig's wiring (examples/spi), written by hand: the parts, their pins, and the codes the device publishes, by the same names.
+# python3 -m onemachine.wiring check|emit|diff examples/spi/wiring/rig.toml   (python/onemachine/wiring.py)
+# TOML, not the essay's YAML: Python reads it with the standard library (tomllib).
+board = "wemos-d1-mini"          # its pins and their facts: OneChip's Esp8266Pins, read through facts.txt (examples/spi/describe.cpp)
+
+[i2c]
+sda = "D2"
+scl = "D1"
+hz = 100000
+
+[spi]
+sck = "D5"
+miso = "D6"
+mosi = "D7"
+hz = 4000000
+empty_cs = ["D3"]                # a chip select declared with nothing on it: the scan reports the slot empty
+
+# The App's machines, in order: a code's path starts with its machine's position (rfid 0, air 1).
+[parts.rfid]
+driver = "rc522"
+bus = "spi"
+cs = "D8"                        # GPIO15, low at reset: the RC522 can hold SDA high and the board boots in SDIO mode, so a 10k in series in this wire
+rst = "D4"                       # held high by the sketch; low resets the reader
+irq = { pin = "D0", mode = "push-pull", delivery = "sampled" }
+
+[parts.air]
+driver = "bmp280"
+bus = "i2c"
+addr = 0x76
+accept = [0x58, 0x60]            # BMP280, BME280
+
+# What the App publishes: code = "part/node", in the order the device numbers them
+[publish]
+temp = "air/temp"
+press = "air/press"
+air = "air/ctrl"
+"air/config" = "air/ctrl/config"
+"air/ctrl_meas" = "air/ctrl/ctrl_meas"
+card = "rfid/card"

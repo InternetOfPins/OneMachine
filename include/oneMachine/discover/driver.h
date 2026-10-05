@@ -79,7 +79,9 @@ namespace discover {
     }
 
     static void found(uint8_t addr, RowId bus) {
-      RowId self = W::reg.add(addr, instOf<Impl>(), bus, false);
+      RowId self;
+      if constexpr (W::reviveRows) self = W::reg.addReusing(addr, instOf<Impl>(), bus);   // a part that came back takes its Gone row again
+      else self = W::reg.add(addr, instOf<Impl>(), bus, false);
       if constexpr (Impl::isBridge) {
         Impl::clear(addr);   // a bridge may keep a stale selection across a warm reset
         if (self != noRow)
