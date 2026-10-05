@@ -89,6 +89,8 @@ class Tree:
         object.__setattr__(self, 'missed', 0)
         object.__setattr__(self, 'resyncs', 0)
         object.__setattr__(self, '_seq', 0)
+        object.__setattr__(self, '_last', {})        # the value changes() last gave per code
+        object.__setattr__(self, '_told', {})        # the status changes() last gave per row
         self.refresh()
 
     def _call(self, op, payload=b''):
@@ -163,17 +165,21 @@ class Tree:
             object.__setattr__(self, '_seq', seq)
             object.__setattr__(self, 'missed', self.missed + drops)
             if flags & 1: object.__setattr__(self, 'resyncs', self.resyncs + 1)
+            told = set()                                                          # the rows whose status this reply announced
             for i in range(4, len(data), 5):
-                num, raw = data[i], struct.unpack_from('<i', data, i + 1)[0]
-                if num & 0x80:                                                    # a row's status: the code that stands for the row, and the status now
-                    c = self._codes[num & 0x7F] if (num & 0x7F) < len(self._codes) else None
-                    status = STATUS[raw] if 0 <= raw < len(STATUS) else 'gone'
-                    if c is None: out.append(Change('#%d' % (num & 0x7F), status=status)); continue
-                    self._status[c.src] = status
-                    out.extend(Change(k.name, status=status) for k in self._codes if k.src == c.src)       # every code of that part
-                    continue
+                kind, num, raw = data[i] >> 6, data[i] & 0x3F, struct.unpack_from('<i', data, i + 1)[0]
                 c = self._codes[num] if num < len(self._codes) else None
-                out.append(Change(c.name if c else '#%d' % num, c.to_value(raw) if c else raw, raw))
+                if c is None: out.append(Change('#%d' % num, raw, raw)); continue
+                if kind == 3: out.append(Change(c.name, c.to_value(raw), raw)); continue     # an event: one occurrence
+                status = STATUS[kind]
+                moved = status != self._told.get(c.src, c.status)
+                if (flags & 1 or moved) and c.src not in told:                    # the row's status: every code of that part
+                    told.add(c.src); self._status[c.src] = self._told[c.src] = status
+                    out.extend(Change(k.name, status=status) for k in self._codes if k.src == c.src)
+                # the value: the bit was set by the value (the status did not move), or the status moved and the value with it, or a resync
+                if c.kind != 'group' and c.notify != 'event' and (flags & 1 or not moved or self._last.get(c.name) != raw):
+                    self._last[c.name] = raw
+                    out.append(Change(c.name, c.to_value(raw), raw))
             if not flags & 2: return out
 
     def fault(self, key):
