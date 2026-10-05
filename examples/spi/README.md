@@ -37,6 +37,16 @@ interrupt part is optional as a whole: a mode without `using Irq` is the polling
 command runs. Keep the IRQ off the boot strapping pins (D3, D4, D8, rejected at compile time): the RC522 keeps its state across a
 reset of the board, and a pending request would hold such a pin low at the next boot.
 
+## The air sensor as a machine
+
+The BMP280/BME280 is a static machine of OneMenu `ItemDef` nodes (`src/bmp280_machine.h`): `#0 temp` and `#1 press` (read-only values that
+move when the sensor is read), `#2 cal` (the device's calibration constants: read when it is found, never state) and `#3 ctrl`, a group of
+register mimics whose `get()` reads the chip and `set()` writes it; their defaults are the init. The App publishes two values under its own codes
+with `Published<Code, Node, node, OnSync<fn>>`: an outer node that refers to the inner one without copying it. A sync pass calls `fn(value)` for each
+published value that changed, so `temp=` and `press=` appear only when they move. Key `d` prints the description: the machine's nodes, then the
+published codes with their path (`<bus>/<address>/<node>`), fields and whether they notify. Key `a` reads the control group by path, `o` sets
+`ctrl_meas` to oversampling x1, `r` writes the registers' defaults again.
+
 ## Build and flash
 
 ```

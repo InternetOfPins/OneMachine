@@ -11,6 +11,8 @@
 // the register is reported to the failure edge, and the row then polls the register instead (rc522::PollOnLineFault). Not on a boot strapping pin (D3, D4, D8): the RC522 keeps its state across a reset of the
 // board and a pending request would hold the line low at the next boot.
 //
+// The air sensor is a static machine of OneMenu ItemDef nodes (bmp280_machine.h); the App publishes two of its values under its own codes
+// (<ms> temp=26.99, <ms> press=1017.42) when they change, and the control group (air) by path.
 // Line format: <ms> <name>[<row>]=<value>   a card's UID in hex when one arrives, 0 when it leaves (after 3 polls
 // without it, or when the reader stops answering). miss[1]=<n>: polls in a row that found no card while one is held.
 //              rfid[1] stale | gone | alive, init #<n> | reinit, init #<n>    the reader's row, and how often it was initialised
@@ -20,6 +22,8 @@
 // The reader is under failure handling (fail::DevEdge): a reader that stops answering goes Stale, is probed, and is initialised again when
 // it answers; one that was reset without the sketch knowing (its configuration gone) is initialised again at once. A health monitor watches the
 // row: one that keeps flapping is quarantined (not polled) for a growing time. Faults, from the serial monitor:
+//   a   the air control group, read by path (config, ctrl_meas)   o   ctrl_meas = 0x27 (oversampling x1)   r   the registers' defaults again
+//   d   the air sensor's description: its machine, and what is published of it (codes, paths, fields, which ones notify)
 //   v   RST low for 3 s: the reader vanishes
 //   p   RST low for 1 ms: a silent reset, the reader still answers and has lost its configuration
 //   IRQ <ms> rx=R tmo=T spurious=S missed=M none=N 0x<ComIrqReg>:<count> ...   every 5 s, the IRQ line against ComIrqReg
@@ -37,7 +41,7 @@
 #include <oneMachine/fail/health.h>
 #include "rc522.h"
 #include "irq_esp8266.h"
-#include "bmp280.h"
+#include "bmp280_machine.h"
 
 #ifndef BUILD_REV
   #define BUILD_REV "unknown"   // set by ../version.py: each repo's git commit
@@ -52,7 +56,7 @@ using Spi = hapi::APIOf<oneBus::SpiAPI, oneBus::SpiSlots<esp::OutPin<15>, esp::O
                         oneBus::SpiMaster<4000000>, esp::Esp8266SpiCore>;
 
 struct Printer {
-  using Accepts = Chain<rc522::Card, bmp::Temp, bmp::Press>;
+  using Accepts = Chain<rc522::Card>;
   template<typename Cap>
   struct Body {
     template<typename T> struct Part : T {
@@ -128,13 +132,52 @@ inline void IrqCounters::report(uint32_t now) {
 }
 
 constexpr uint8_t rstPin = 2;    // D4: the RC522's RST
-struct AirApp  : discover::World<AirApp, Twi, Chain<Printer>, bmp::Entries<AirApp>, 3, discover::I2cScan> {};
+struct AirApp;
+using Bmp = bmpm::Machine<AirApp>;
+struct AirApp  : discover::World<AirApp, Twi, Chain<>, Bmp::Entries, 3, discover::I2cScan> {};
+
+// What the App publishes of the air sensor, under its own codes: an outer node per code that refers to the machine's node. temp and press
+// call say<code, decimals>(value) when they change (the sync pass in loop()); air is the control group, read and written by path, silent.
+struct CodeTemp  { ONEMACHINE_STATE_NAME(name, "temp"); };
+struct CodePress { ONEMACHINE_STATE_NAME(name, "press"); };
+struct CodeAir   { ONEMACHINE_STATE_NAME(name, "air"); };
+template<typename Code, uint8_t Decimals> static void say(int32_t v) {
+  Serial.print(millis()); Serial.print(' '); for (unsigned i = 0, c; (c = Code::name().rom(i)); ++i) Serial.print(char(c)); Serial.print('=');
+  int32_t p = 1; for (uint8_t i = 0; i < Decimals; ++i) p *= 10;
+  if (v < 0) Serial.print('-');
+  const int32_t a = v < 0 ? -v : v;
+  Serial.print(a / p); Serial.print('.');
+  const int32_t frac = a % p;
+  for (int32_t q = p / 10; q > frac && q > 1; q /= 10) Serial.print('0');
+  Serial.println(frac);
+}
+using PubTemp  = bmpm::Published<CodeTemp,  Bmp::Temp,  Bmp::temp,  oneData::OnSync<&say<CodeTemp, 2>>>;
+using PubPress = bmpm::Published<CodePress, Bmp::Press, Bmp::press, oneData::OnSync<&say<CodePress, 2>>>;
+using PubAir   = bmpm::Published<CodeAir,   Bmp::Ctrl,  Bmp::ctrl>;
+using Published = Chain<PubTemp, PubPress, PubAir>;
+constexpr uint8_t airBus = 1;   // the air sensor's bus is the App's second machine: its path codes start with 1
+
+struct SerialPut { void operator()(char c) { Serial.write(c); } };
 
 template<typename A> static void table(const __FlashStringHelper* bus) {
   Serial.print(bus); Serial.print(F(": ")); Serial.print(A::reg.count - 1); Serial.println(F(" device(s)"));
   for (RowId r = 1; r < A::reg.count; ++r) {
     Serial.print(F("  row ")); Serial.print(r); Serial.print(F(" at 0x")); Serial.println(A::reg.rows[r].busId, HEX);
   }
+}
+
+// the machine and what is published of it, for a consumer: a row's address is its identity in the path
+static void describe() {
+  if (AirApp::reg.count < 2) return;
+  SerialPut put;
+  bmpm::describe<Bmp, Published>(put, airBus, Bmp::Dev::addr);
+}
+
+// the control group by path: node #3, then its registers #0 and #1; get() reads the chip
+static void air() {
+  if (AirApp::reg.count < 2) return;
+  Serial.print(millis()); Serial.print(F(" air config=0x")); Bmp::visitReg(0, [](auto& r) { Serial.print(r.get(), HEX); });
+  Serial.print(F(" ctrl_meas=0x")); Bmp::visitReg(1, [](auto& r) { Serial.print(r.get(), HEX); }); Serial.println();
 }
 
 void setup() {
@@ -152,6 +195,7 @@ void setup() {
   AirApp::discover();
   table<RfidApp>(F("SPI slots"));
   table<AirApp>(F("I2C"));
+  describe();
   if (RfidApp::reg.count > 1) {
     Serial.print(F("RC522 version 0x")); Serial.print(Rfid::rd(1, rc522::VersionReg), HEX);
     Serial.println();
@@ -213,6 +257,10 @@ static void faults(uint32_t now) {
   if (Serial.available()) {
     const int c = Serial.read();
     if (c == 'v' && !vanished) { Serial.print(now); Serial.println(F(" fault: RST low 3 s")); esp::OutPin<rstPin>::off(); vanished = true; vanishEnd = now + 3000; }
+    else if (c == 'd') describe();
+    else if (c == 'a') air();
+    else if (c == 'o') { Bmp::visitReg(1, [](auto& r) { r.set(0x27); }); air(); }   // ctrl_meas: temperature x1, pressure x1, normal mode
+    else if (c == 'r') { Bmp::restoreDefaults(); air(); }
     else if (c == 'p' && !vanished) {
       Serial.print(now); Serial.println(F(" fault: RST pulse"));
       esp::OutPin<rstPin>::off(); delayMicroseconds(1000); esp::OutPin<rstPin>::on();
@@ -251,7 +299,7 @@ void loop() {
   RfidApp::Health::onTick(now);
   logRfid();
   logHealth();
-  if (int32_t(now - nextAir)  >= 0) { nextAir  = now + 1000; AirApp::pump(); }
+  if (int32_t(now - nextAir)  >= 0) { nextAir  = now + 1000; AirApp::pump(); bmpm::PublishAll<Published>::sync(); }
   static uint32_t nextIrq = 5000;
   if (int32_t(now - nextIrq) >= 0) { nextIrq = now + 5000; IrqCounters::report(now); LoopStats::report(now); }
 }
