@@ -4,6 +4,7 @@
 #   rules  : each compile-time rule rejects its case with its own message.
 #   bmp    : the BMP280 as a machine of ItemDef nodes (bmp_machine.cpp, against a simulated chip with the datasheet's worked example), and its
 #            capture and restore under a failure edge: reset behind the host's back, unplugged, replaced (bmp_capture.cpp).
+#   link   : the Python consumer of the machine tree (python/onemachine/tree.py) against the air sensor on a simulated chip (test/link/build.sh).
 #   irq    : the RC522's interrupt part (spi_irq.cpp) and the ESP8266 delivery components' pin rules (irq_delivery.cpp).
 #   AVR    : avr-g++ -Os atmega328p, linked over the real AVR SPI core -- it builds, and its size.
 # Exits non-zero if an assertion fails, a rule does not fire, or the AVR image does not build.
@@ -96,6 +97,9 @@ for pair in "NEG_ID_IDLE:an SPI id of 0x00 or 0xFF is what an empty slot reads" 
   if g++ -std=c++17 -D$def $INC -fsyntax-only spi1.cpp 2>&1 | grep -qF "$msg"; then echo "OK: -D$def rejected: $msg"
   else echo "FAIL: -D$def was not rejected with '$msg'"; rc=1; fi
 done
+
+echo; echo "=== the Python consumer of the machine tree (test/link): over a pipe and in-process (ctypes) ==="
+if command -v python3 >/dev/null; then bash ../link/build.sh 2>&1 | grep -E "^OK|^FAIL|Error|Traceback" || rc=1; else echo "(python3 not found: skipped)"; fi
 
 if command -v avr-g++ >/dev/null; then
   echo; echo "=== avr-g++ $(avr-g++ -dumpversion) -Os atmega328p (linked, real SPI core) ==="

@@ -58,6 +58,26 @@ written again; another part, the settings are dropped and the defaults are the i
 Keys: `a` reads the control group by path, `o` sets `ctrl_meas` to oversampling x1, `q` to 0x2B (also while the sensor is unplugged), `r` writes the
 registers' defaults, `x` resets the sensor behind the host's back.
 
+## A Python consumer over the serial port
+
+`pio run -e d1_mini_link -t upload` builds the same sketch with the serial port carrying the link (`link/frame.h`: the request and response framing of
+`role/link.h`) instead of the log. `python/onemachine` reads it, with the package's own `StreamLink`:
+
+```python
+import serial
+from onemachine import Tree, StreamLink
+ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=2)
+m = Tree(StreamLink(ser.read, ser.write, ser.flush))   # reads the description
+m.temp, m.press                                        # 27.62, 1026.68: scaled as the description says (0.01 C, 0.01 hPa)
+m.air.ctrl_meas = 0x27                                 # set by code; read-only and out-of-range are refused here, before anything is sent
+m.changes()                                            # [Change('temp', 27.61, 2761), Change('card', 4062320374, ...)]: what changed since the last call
+```
+
+Ops: `d` the description, `v` get by code, `w` set by code (through the node: its limits, its capture, its register), `n` the changes since the last `n`, `f` one
+fault key (`x` resets the air sensor behind the host's back, `v` and `p` reset the RFID reader). The changes wait in a `fail::Buffer` of 8: when a consumer
+does not read for a while the newest are refused and counted, and the reply of `n` says how many it missed (`m.missed`); read the values again with
+`m.temp`. `examples/spi/rig_session.py` is a session on the real board; `test/link/build.sh` runs the same consumer against a simulated one.
+
 ## Build and flash
 
 ```

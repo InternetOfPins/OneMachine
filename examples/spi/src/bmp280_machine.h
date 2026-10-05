@@ -39,6 +39,8 @@ namespace bmpm {
   template<typename T> struct Label { template<typename O> struct Part : O { using O::O; static constexpr state::Name label() { return T::name(); } }; };
   template<uint8_t N> struct Scaled { template<typename O> struct Part : O { using O::O; static constexpr uint8_t decimals = N; }; };
   template<uint8_t A, uint8_t Def> struct RegAt { template<typename O> struct Part : O { using O::O; static constexpr uint8_t regAddr = A, regDef = Def; }; };
+  // the values a node accepts, inclusive: a set outside them is refused (the description carries them, so a consumer checks before it sends)
+  template<long Lo, long Hi> struct Limits { template<typename O> struct Part : O { using O::O; static constexpr long limLo = Lo, limHi = Hi; }; };
   template<uint8_t A, uint8_t N> struct ConstAt { template<typename O> struct Part : O { using O::O; static constexpr uint8_t constAddr = A, constLen = N; }; };
   // the publish tag of an outer node: the code it is published under and the machine node it refers to
   // Via: the PathRef it reaches the node by (void: an ItemRef)
@@ -112,7 +114,7 @@ namespace bmpm {
 
     // a register mimic: get() reads the chip, set() writes it
     template<uint8_t A> struct RegSrc { static uint8_t get() { return Dev::rd(A); } static void set(uint8_t v) { Dev::wr(A, v); } };
-    template<typename Tag, uint8_t A, uint8_t Def> using Reg = ItemDef<Capture, oneData::DataFn<RegSrc<A>>, RegAt<A, Def>, Label<Tag>, RestoreEnd>;
+    template<typename Tag, uint8_t A, uint8_t Def> using Reg = ItemDef<Capture, oneData::DataFn<RegSrc<A>>, RegAt<A, Def>, Limits<0, 255>, Label<Tag>, RestoreEnd>;
 
     using Temp  = ItemDef<Scaled<2>, Label<TagTemp>,  oneData::ReadOnly<oneData::Watch<oneData::DataRef<&Dev::temp>>>>;
     using Press = ItemDef<Scaled<2>, Label<TagPress>, oneData::ReadOnly<oneData::Watch<oneData::DataRef<&Dev::press>>>>;
@@ -310,6 +312,7 @@ namespace bmpm {
       static decltype(auto) get() { return ref().get(); }
       [[nodiscard]] static bool changed() { return ref().changed(); }
       static void sync() { ref().sync(); }
+      template<typename V> static void set(V&& v) { ref().set(std::forward<V>(v)); }      // through the node: its limits, its capture, its register
     };
   };
   // an outer node reaching its inner node by path
@@ -340,6 +343,8 @@ namespace bmpm {
   template<typename T> struct HasDecimals<T, std::void_t<decltype(T::decimals)>> : std::true_type {};
   template<typename T, typename = void> struct HasReg : std::false_type {};
   template<typename T> struct HasReg<T, std::void_t<decltype(T::regAddr)>> : std::true_type {};
+  template<typename T, typename = void> struct HasLimits : std::false_type {};
+  template<typename T> struct HasLimits<T, std::void_t<decltype(T::limLo)>> : std::true_type {};
   template<typename T, typename = void> struct HasConst : std::false_type {};
   template<typename T> struct HasConst<T, std::void_t<decltype(T::constAddr)>> : std::true_type {};
   template<typename T, typename = void> struct HasSet : std::false_type {};
@@ -357,7 +362,8 @@ namespace bmpm {
     // what one node is: its fields, on the rest of the line
     template<typename N> void fields() {
       if constexpr (IsGroup<N>::value) { str(" group "); dec(N::Body::size()); }
-      else if constexpr (HasReg<N>::value) { str(" reg "); hex(N::regAddr); str(" default "); hex(N::regDef); str(HasSet<N>::value ? " rw" : " ro"); }
+      else if constexpr (HasReg<N>::value) { str(" reg "); hex(N::regAddr); str(" default "); hex(N::regDef); str(HasSet<N>::value ? " rw" : " ro");
+        if constexpr (HasLimits<N>::value) { str(" range "); dec(uint32_t(N::limLo)); str(".."); dec(uint32_t(N::limHi)); } }
       else if constexpr (HasConst<N>::value) { str(" const "); hex(N::constAddr); str(" ["); dec(N::constLen); put(']'); }
       else { str(HasSet<N>::value ? " rw" : " ro"); str(" value"); if constexpr (HasDecimals<N>::value) { str(" scaled "); dec(N::decimals); } }
     }
