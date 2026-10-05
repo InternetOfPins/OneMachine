@@ -2,6 +2,7 @@
 # discoverCompose: every round's verification. Exit 0 = all claims hold.
 cd "$(dirname "$0")"
 rc=0
+../tools/selftest.sh || rc=1
 ./build_r1.sh || rc=1
 echo; echo "################ Round 2 ################"
 ./build_r2.sh || rc=1

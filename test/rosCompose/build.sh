@@ -7,6 +7,7 @@
 # Exits non-zero if any claim does not hold.
 set -e
 cd "$(dirname "$0")"
+. ../tools/lastok.sh
 INC="-I ../../include -I ../../../HAPI/include"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 rc=0
@@ -16,15 +17,15 @@ bad() { echo "FAIL: $*"; rc=1; }
 echo "=== native g++ $(g++ -dumpversion) -O2 ==="
 g++ -std=c++17 -O2 -Wall -Wextra $INC round1.cpp -o "$OUT/r1" 2> "$OUT/r1.txt" || { bad "round1 does not compile"; cat "$OUT/r1.txt"; }
 "$OUT/r1" | tail -2
-"$OUT/r1" | tail -1 | grep -q '^OK' && [ "$(grep -c warning "$OUT/r1.txt" || true)" = 0 ] && ok "g++ -O2, 0 warnings" || bad "round1 native"
+lastok "$OUT/r1" && [ "$(grep -c warning "$OUT/r1.txt" || true)" = 0 ] && ok "g++ -O2, 0 warnings" || bad "round1 native"
 
 echo; echo "=== native -O1 -fsanitize=address,undefined ==="
 g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC round1.cpp -o "$OUT/r1san"
-"$OUT/r1san" | tail -1 | grep -q '^OK' && ok "ASan+UBSan" || bad "round1 under sanitizers"
+lastok "$OUT/r1san" && ok "ASan+UBSan" || bad "round1 under sanitizers"
 if command -v clang++ >/dev/null; then
   echo; echo "=== native clang++ $(clang++ -dumpversion) -O2 ==="
   clang++ -std=c++17 -O2 -Wall -Wextra $INC round1.cpp -o "$OUT/r1clang" 2> "$OUT/r1c.txt"
-  "$OUT/r1clang" | tail -1 | grep -q '^OK' && [ "$(grep -c warning "$OUT/r1c.txt" || true)" = 0 ] && ok "clang++, 0 warnings" || bad "round1 under clang"
+  lastok "$OUT/r1clang" && [ "$(grep -c warning "$OUT/r1c.txt" || true)" = 0 ] && ok "clang++, 0 warnings" || bad "round1 under clang"
 fi
 
 echo; echo "=== avr-g++ $(avr-g++ -dumpversion) -Os atmega328p, bare (no framework) ==="

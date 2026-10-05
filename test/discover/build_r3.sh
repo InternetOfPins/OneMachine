@@ -8,6 +8,7 @@
 # Exits non-zero if any claim fails. Overrides: HAPI=<dir> ONEBUS=<dir> (checkouts holding include/).
 set -u
 cd "$(dirname "$0")"
+. ../tools/lastok.sh
 HAPI=${HAPI:-../../../HAPI}; ONEBUS=${ONEBUS:-../../../OneBus}
 HAPI_ABS=$(cd "$HAPI" && pwd); ONEBUS_ABS=$(cd "$ONEBUS" && pwd)
 INC="-I ../../include -I $HAPI/include -I $ONEBUS/include"
@@ -38,10 +39,10 @@ if g++ -std=c++17 -O2 -Wall -Wextra $INC round3.cpp -o "$OUT/r3" && "$OUT/r3" > 
   grep -E "^(state:|checksum|OK:)" "$OUT/r3.out"; ok "round3 native scenarios"
 else bad "round3 native"; grep -E "^FAIL" "$OUT/r3.out" | head; fi
 echo; echo "=== native -O1 -fsanitize=address,undefined ==="
-if g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC round3.cpp -o "$OUT/r3san" && "$OUT/r3san" | tail -1 | grep -q "^OK"; then ok "round3 under ASan+UBSan"; else bad "round3 under ASan+UBSan"; fi
+if g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC round3.cpp -o "$OUT/r3san" && lastok "$OUT/r3san"; then ok "round3 under ASan+UBSan"; else bad "round3 under ASan+UBSan"; fi
 if command -v clang++ >/dev/null; then
   echo; echo "=== native clang++ $(clang++ -dumpversion) -O2 ==="
-  if clang++ -std=c++17 -O2 -Wall -Wextra $INC round3.cpp -o "$OUT/r3clang" && "$OUT/r3clang" | tail -1 | grep -q "^OK"; then ok "round3 under clang"; else bad "round3 under clang"; fi
+  if clang++ -std=c++17 -O2 -Wall -Wextra $INC round3.cpp -o "$OUT/r3clang" && lastok "$OUT/r3clang"; then ok "round3 under clang"; else bad "round3 under clang"; fi
 fi
 
 echo; echo "=== broken variants must be caught (each a sed-patched copy of the real header(s), not a build-time switch) ==="
