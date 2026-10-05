@@ -1,4 +1,4 @@
-// Capture and restore on the BMP280 machine, under a failure edge (fail::DevEdge over the I2C bus edge), against a simulated chip (mockBmpTwi.h).
+// Capture and restore on the BMP280 machine (one Reconcile part per register: what is wanted of it, compared with what it reads back), under a failure edge (fail::DevEdge over the I2C bus edge), against a simulated chip (mockBmpTwi.h).
 //   - found: the defaults are the init and are captured; the slot (the row, the machine's statics) is kept while the part is gone
 //   - a set is captured; the part is reset without the host knowing (soft reset): the canary sees a register that no longer holds the capture,
 //     Recover calls reinit(), the part is validated (same chip id and calibration) and the capture is replayed
@@ -62,8 +62,7 @@ static void start() {
   now = 0; leftAlive = false;
   App::discover();
 }
-static uint8_t cap(unsigned i) { uint8_t v = 0; M::visitReg(uint8_t(i), [&](auto& r) { v = r.captured(); }); return v; }
-static bool known(unsigned i) { bool k = false; M::visitReg(uint8_t(i), [&](auto& r) { k = r.known(); }); return k; }
+static uint8_t cap(unsigned i) { uint8_t v = 0; M::visitReg(uint8_t(i), [&](auto& r) { v = r.desired(); }); return v; }   // what the register wants (Reconcile)
 
 int main() {
   using mockbmp::State;
@@ -74,7 +73,7 @@ int main() {
   CHECK(App::reg.count == 2 && App::reg.status(1) == Status::Alive);
   CHECK(M::Dev::defaulted == 1 && M::Dev::restored == 0);
   CHECK(c.regs[0xF5] == 0x90 && c.regs[0xF4] == 0x57);
-  CHECK(known(0) && known(1) && cap(0) == 0x90 && cap(1) == 0x57);
+  CHECK(cap(0) == 0x90 && cap(1) == 0x57);
   CHECK(M::Dev::known);
   advance(500);
   CHECK(M::Dev::temp == 2508 && M::Dev::press == 100653);
@@ -123,7 +122,7 @@ int main() {
   CHECK(runUntil(Status::Alive, 3000));
   advance(200);
   CHECK(c.regs[0xF4] == 0x57 && c.regs[0xF5] == 0x90);                                // the defaults, not 0x2B
-  CHECK(cap(1) == 0x57 && known(1));                                                  // the old capture is gone; the defaults are captured
+  CHECK(cap(1) == 0x57);                                                              // the old intent is gone; the defaults are wanted
   CHECK(M::Dev::defaulted == 2 && M::Dev::restored == 2 && M::Dev::ident != before);
   CHECK(M::Dev::cal.T2 == 0x7043);                                                    // its calibration, read again
 
