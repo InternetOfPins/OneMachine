@@ -39,13 +39,24 @@ reset of the board, and a pending request would hold such a pin low at the next 
 
 ## The air sensor as a machine
 
-The BMP280/BME280 is a static machine of OneMenu `ItemDef` nodes (`src/bmp280_machine.h`): `#0 temp` and `#1 press` (read-only values that
-move when the sensor is read), `#2 cal` (the device's calibration constants: read when it is found, never state) and `#3 ctrl`, a group of
-register mimics whose `get()` reads the chip and `set()` writes it; their defaults are the init. The App publishes two values under its own codes
-with `Published<Code, Node, node, OnSync<fn>>`: an outer node that refers to the inner one without copying it. A sync pass calls `fn(value)` for each
-published value that changed, so `temp=` and `press=` appear only when they move. Key `d` prints the description: the machine's nodes, then the
-published codes with their path (`<bus>/<address>/<node>`), fields and whether they notify. Key `a` reads the control group by path, `o` sets
-`ctrl_meas` to oversampling x1, `r` writes the registers' defaults again.
+The BMP280/BME280 is a static machine of OneMenu `ItemDef` nodes (`src/bmp280_machine.h`), and takes its Criteria: `Machine<W, Addr<0x76>>`
+(a second sensor at 0x77 is a second type with its own data). Nodes: `#0 temp` and `#1 press` (read-only values that move when the sensor is
+read), `#2 cal` (the device's calibration constants: read when it is found, never state) and `#3 ctrl`, a group of register mimics whose `get()`
+reads the chip and `set()` writes it; their defaults are the init.
+
+The App publishes nodes under its own codes with `PublishedAt<Code, PathRef<Machine, 3, 1>, OnSync<fn>>`: an outer node that reaches the inner one
+by a compile-time path (node #3, child #1; any node, a leaf of a group too) without copying it. A sync pass calls `fn(value)` for each published
+value that changed, so `temp=` and `press=` appear only when they move. Key `d` prints the description: the machine's nodes, then the published
+codes with their path (`<bus>/<address>/<node>[/<child>]`), fields and whether they notify.
+
+Each register keeps the last value set (`Capture`), also while the sensor is gone. The sensor is under failure handling: each poll reads the control
+registers back, and a register that no longer holds what was set means the part was reset behind the host's back. When the sensor is back, after
+that or after it was unplugged, it is validated (the same chip id and calibration as the part that was here): validated, the last settings are
+written again; another part, the settings are dropped and the defaults are the init. The log shows `STATUS <ms> air <from>-><to>`, then
+`air restored #n` or `air defaults #n`.
+
+Keys: `a` reads the control group by path, `o` sets `ctrl_meas` to oversampling x1, `q` to 0x2B (also while the sensor is unplugged), `r` writes the
+registers' defaults, `x` resets the sensor behind the host's back.
 
 ## Build and flash
 

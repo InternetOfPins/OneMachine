@@ -2,7 +2,8 @@
 # SPI discovery round 1 verification.
 #   native : g++ -O2 (+ASan/UBSan, + clang if present) -- the identification, empty-slot and RC522 card assertions.
 #   rules  : each compile-time rule rejects its case with its own message.
-#   bmp    : the BMP280 as a machine of ItemDef nodes (bmp_machine.cpp, against a simulated chip with the datasheet's worked example).
+#   bmp    : the BMP280 as a machine of ItemDef nodes (bmp_machine.cpp, against a simulated chip with the datasheet's worked example), and its
+#            capture and restore under a failure edge: reset behind the host's back, unplugged, replaced (bmp_capture.cpp).
 #   irq    : the RC522's interrupt part (spi_irq.cpp) and the ESP8266 delivery components' pin rules (irq_delivery.cpp).
 #   AVR    : avr-g++ -Os atmega328p, linked over the real AVR SPI core -- it builds, and its size.
 # Exits non-zero if an assertion fails, a rule does not fire, or the AVR image does not build.
@@ -11,6 +12,8 @@ cd "$(dirname "$0")"
 INC="-I ../../include -I ../../../HAPI/include -I ../../../OneBus/include"
 OUT=$(mktemp -d); trap 'rm -rf "$OUT"' EXIT
 rc=0
+# run a test binary: its last line, and a failure (its exit status, not tail's) when it does not exit 0
+run() { local o s; o=$("$@" 2>&1); s=$?; printf '%s\n' "$o" | tail -1; if [ $s -ne 0 ]; then echo "FAIL: $* exited $s"; printf '%s\n' "$o" | head -4; rc=1; fi; }
 
 echo "=== native g++ $(g++ -dumpversion) -O2 ==="
 g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $INC spi1.cpp -o "$OUT/s1"
@@ -18,32 +21,32 @@ g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $INC spi1.cpp -o "$OUT/s1"
 
 echo; echo "=== native -O1 -fsanitize=address,undefined ==="
 g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC spi1.cpp -o "$OUT/s1san"
-"$OUT/s1san" | tail -1 || rc=1
+run "$OUT/s1san"
 
 if command -v clang++ >/dev/null; then
   echo; echo "=== native clang++ $(clang++ -dumpversion) -O2 ==="
   clang++ -std=c++17 -O2 -Wall -Wextra $INC spi1.cpp -o "$OUT/s1clang"
-  "$OUT/s1clang" | tail -1 || rc=1
+  run "$OUT/s1clang"
 fi
 
 echo; echo "=== RC522 under the failure edge (spi_fail.cpp): g++ -O2, then ASan/UBSan ==="
 g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $INC spi_fail.cpp -o "$OUT/sf"
 "$OUT/sf" || rc=1
 g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC spi_fail.cpp -o "$OUT/sfsan"
-"$OUT/sfsan" | tail -1 || rc=1
+run "$OUT/sfsan"
 if command -v clang++ >/dev/null; then
   clang++ -std=c++17 -O2 -Wall -Wextra $INC spi_fail.cpp -o "$OUT/sfclang"
-  "$OUT/sfclang" | tail -1 || rc=1
+  run "$OUT/sfclang"
 fi
 
 echo; echo "=== RC522 under the health monitor (spi_health.cpp): g++ -O2, then ASan/UBSan ==="
 g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $INC spi_health.cpp -o "$OUT/sh"
 "$OUT/sh" || rc=1
 g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $INC spi_health.cpp -o "$OUT/shsan"
-"$OUT/shsan" | tail -1 || rc=1
+run "$OUT/shsan"
 if command -v clang++ >/dev/null; then
   clang++ -std=c++17 -O2 -Wall -Wextra $INC spi_health.cpp -o "$OUT/shclang"
-  "$OUT/shclang" | tail -1 || rc=1
+  run "$OUT/shclang"
 fi
 
 echo; echo "=== RC522 interrupt part (spi_irq.cpp): fail-fast, -DFALLBACK, -DNOCHECK; g++ -O2, then ASan/UBSan ==="
@@ -51,19 +54,26 @@ for cfg in "" "-DFALLBACK" "-DNOCHECK"; do
   g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror $cfg $INC spi_irq.cpp -o "$OUT/si"
   echo "[${cfg:-default}] $("$OUT/si")" || rc=1
   g++ -std=c++17 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all $cfg $INC spi_irq.cpp -o "$OUT/sisan"
-  "$OUT/sisan" | tail -1 || rc=1
+  run "$OUT/sisan"
   if command -v clang++ >/dev/null; then
     clang++ -std=c++17 -O2 -Wall -Wextra $cfg $INC spi_irq.cpp -o "$OUT/siclang"
-    "$OUT/siclang" | tail -1 || rc=1
+    run "$OUT/siclang"
   fi
 done
 
 echo; echo "=== BMP280 as a machine of ItemDef nodes (bmp_machine.cpp): g++ -O1, then ASan/UBSan, then clang++ ==="
 MINC="$INC -I ../../../OneData/include -I ../../../OneMenu/include -I ../../../OneItem/include -I ../../../OneOutput/include -I ../../../OneBit/include -I ../../../OnePin/include -I ../../../OneChip/include -I ../../../OneParse/include -I ../../../OneInput/include -I ../../../OneIO/include"
 g++ -std=c++17 -O1 -Wall $MINC bmp_machine.cpp -o "$OUT/bm" && { "$OUT/bm" || rc=1; }
-g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all $MINC bmp_machine.cpp -o "$OUT/bmsan" && { "$OUT/bmsan" | tail -1 || rc=1; }
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all $MINC bmp_machine.cpp -o "$OUT/bmsan" && { run "$OUT/bmsan"; }
 if command -v clang++ >/dev/null; then
-  clang++ -std=c++17 -O1 $MINC bmp_machine.cpp -o "$OUT/bmclang" && { "$OUT/bmclang" | tail -1 || rc=1; }
+  clang++ -std=c++17 -O1 $MINC bmp_machine.cpp -o "$OUT/bmclang" && { run "$OUT/bmclang"; }
+fi
+
+echo; echo "=== BMP280 machine, capture and restore under a failure edge (bmp_capture.cpp): g++ -O1, ASan/UBSan, clang++ ==="
+g++ -std=c++17 -O1 -Wall $MINC bmp_capture.cpp -o "$OUT/bc" && { "$OUT/bc" || rc=1; }
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all $MINC bmp_capture.cpp -o "$OUT/bcsan" && { run "$OUT/bcsan"; }
+if command -v clang++ >/dev/null; then
+  clang++ -std=c++17 -O1 $MINC bmp_capture.cpp -o "$OUT/bcclang" && { run "$OUT/bcclang"; }
 fi
 
 echo; echo "=== ESP8266 interrupt delivery (irq_delivery.cpp, host stub): the pins that compile, the ones rejected ==="

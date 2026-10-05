@@ -22,6 +22,8 @@
 // The reader is under failure handling (fail::DevEdge): a reader that stops answering goes Stale, is probed, and is initialised again when
 // it answers; one that was reset without the sketch knowing (its configuration gone) is initialised again at once. A health monitor watches the
 // row: one that keeps flapping is quarantined (not polled) for a growing time. Faults, from the serial monitor:
+//   q   ctrl_meas = 0x2B (also while the sensor is unplugged: the last intent is what comes back)
+//   x   the air sensor is reset behind the host's back: the canary sees the registers lost, the part is validated and its last settings come back
 //   a   the air control group, read by path (config, ctrl_meas)   o   ctrl_meas = 0x27 (oversampling x1)   r   the registers' defaults again
 //   d   the air sensor's description: its machine, and what is published of it (codes, paths, fields, which ones notify)
 //   v   RST low for 3 s: the reader vanishes
@@ -132,15 +134,32 @@ inline void IrqCounters::report(uint32_t now) {
 }
 
 constexpr uint8_t rstPin = 2;    // D4: the RC522's RST
+// The air sensor under failure handling: a bus edge and, per device, retry, recover (the part was reset without the host knowing), probe.
+struct AirMode {
+  static constexpr bool checked = true, returnPath = false, idempotent = true, lifecycle = true;
+  template<typename E> using BusStack = fail::Controller<E, fail::TickPart<fail::Retry<0>>, fail::Recover, fail::DetectError,
+    fail::HoldOp<fail::Coalesce>, fail::Backoff<100, 400>, fail::Status>;
+  template<typename E> using DevStack = fail::Controller<E, fail::TickPart<fail::Retry<2>>, fail::Recover, fail::DetectError,
+    fail::HoldOp<fail::Coalesce>, fail::Gate<50>, fail::TickPart<fail::Reprobe<500, 120>>, fail::LazyStatus>;
+};
 struct AirApp;
-using Bmp = bmpm::Machine<AirApp>;
-struct AirApp  : discover::World<AirApp, Twi, Chain<>, Bmp::Entries, 3, discover::I2cScan> {};
+using Bmp = bmpm::Machine<AirApp, bmpm::Addr<0x76>, AirMode>;   // the sensor at 0x76: its Criteria
+using AirDrivers = Chain<Bmp::Driver>;
+struct AirApp : discover::World<AirApp, Twi, Chain<>, Bmp::Entries, 3, discover::I2cScan>, fail::BusEdge<AirApp, AirDrivers, 1, AirMode> {
+  static constexpr bool lifecycle = true;
+  static void release(RowId) {}
+  static void unbindAll() {}
+  static void busReset() { Twi::begin(); }
+};
+using AirTicker = fail::Ticks<AirApp, AirDrivers>;
 
 // What the App publishes of the air sensor, under its own codes: an outer node per code that refers to the machine's node. temp and press
-// call say<code, decimals>(value) when they change (the sync pass in loop()); air is the control group, read and written by path, silent.
+// call say<code, decimals>(value) when they change (the sync pass in loop()); air is the control group and ctrl_meas a register of it, silent.
+// Each reaches its node by a compile-time path into the machine (PathRef<Bmp, 3, 1> is node #3, child #1).
 struct CodeTemp  { ONEMACHINE_STATE_NAME(name, "temp"); };
 struct CodePress { ONEMACHINE_STATE_NAME(name, "press"); };
 struct CodeAir   { ONEMACHINE_STATE_NAME(name, "air"); };
+struct CodeCtrlMeas { ONEMACHINE_STATE_NAME(name, "ctrl_meas"); };
 template<typename Code, uint8_t Decimals> static void say(int32_t v) {
   Serial.print(millis()); Serial.print(' '); for (unsigned i = 0, c; (c = Code::name().rom(i)); ++i) Serial.print(char(c)); Serial.print('=');
   int32_t p = 1; for (uint8_t i = 0; i < Decimals; ++i) p *= 10;
@@ -151,10 +170,11 @@ template<typename Code, uint8_t Decimals> static void say(int32_t v) {
   for (int32_t q = p / 10; q > frac && q > 1; q /= 10) Serial.print('0');
   Serial.println(frac);
 }
-using PubTemp  = bmpm::Published<CodeTemp,  Bmp::Temp,  Bmp::temp,  oneData::OnSync<&say<CodeTemp, 2>>>;
-using PubPress = bmpm::Published<CodePress, Bmp::Press, Bmp::press, oneData::OnSync<&say<CodePress, 2>>>;
-using PubAir   = bmpm::Published<CodeAir,   Bmp::Ctrl,  Bmp::ctrl>;
-using Published = Chain<PubTemp, PubPress, PubAir>;
+using PubTemp  = bmpm::PublishedAt<CodeTemp,  bmpm::PathRef<Bmp, 0>, oneData::OnSync<&say<CodeTemp, 2>>>;
+using PubPress = bmpm::PublishedAt<CodePress, bmpm::PathRef<Bmp, 1>, oneData::OnSync<&say<CodePress, 2>>>;
+using PubAir   = bmpm::PublishedAt<CodeAir,   bmpm::PathRef<Bmp, 3>>;
+using PubCtrlMeas = bmpm::PublishedAt<CodeCtrlMeas, bmpm::PathRef<Bmp, 3, 1>>;   // a leaf of the group, by its path
+using Published = Chain<PubTemp, PubPress, PubAir, PubCtrlMeas>;
 constexpr uint8_t airBus = 1;   // the air sensor's bus is the App's second machine: its path codes start with 1
 
 struct SerialPut { void operator()(char c) { Serial.write(c); } };
@@ -170,7 +190,18 @@ template<typename A> static void table(const __FlashStringHelper* bus) {
 static void describe() {
   if (AirApp::reg.count < 2) return;
   SerialPut put;
-  bmpm::describe<Bmp, Published>(put, airBus, Bmp::Dev::addr);
+  bmpm::describe<Bmp, Published>(put, airBus);
+}
+
+// the air sensor's row: a status change, and each time it came back (its captured state replayed, or the defaults because it was another part)
+static void logAir() {
+  static discover::Status last = discover::Status::Alive;
+  static uint16_t lastRestored = 0, lastDefaulted = 0;
+  if (AirApp::reg.count < 2) return;
+  const discover::Status st = AirApp::reg.status(1);
+  if (st != last) { Serial.print(F("STATUS ")); Serial.print(millis()); Serial.print(F(" air ")); Serial.print(uint8_t(last)); Serial.print(F("->")); Serial.println(uint8_t(st)); last = st; }
+  if (Bmp::Dev::restored != lastRestored) { lastRestored = Bmp::Dev::restored; Serial.print(millis()); Serial.print(F(" air restored #")); Serial.println(lastRestored); }
+  if (Bmp::Dev::defaulted != lastDefaulted) { lastDefaulted = Bmp::Dev::defaulted; Serial.print(millis()); Serial.print(F(" air defaults #")); Serial.println(lastDefaulted); }
 }
 
 // the control group by path: node #3, then its registers #0 and #1; get() reads the chip
@@ -259,7 +290,9 @@ static void faults(uint32_t now) {
     if (c == 'v' && !vanished) { Serial.print(now); Serial.println(F(" fault: RST low 3 s")); esp::OutPin<rstPin>::off(); vanished = true; vanishEnd = now + 3000; }
     else if (c == 'd') describe();
     else if (c == 'a') air();
+    else if (c == 'x') { Serial.print(now); Serial.println(F(" fault: air sensor soft reset")); Bmp::Dev::wr(0xE0, 0xB6); }
     else if (c == 'o') { Bmp::visitReg(1, [](auto& r) { r.set(0x27); }); air(); }   // ctrl_meas: temperature x1, pressure x1, normal mode
+    else if (c == 'q') { Bmp::visitReg(1, [](auto& r) { r.set(0x2B); }); air(); }   // ctrl_meas: temperature x1, pressure x2, normal mode
     else if (c == 'r') { Bmp::restoreDefaults(); air(); }
     else if (c == 'p' && !vanished) {
       Serial.print(now); Serial.println(F(" fault: RST pulse"));
@@ -294,10 +327,13 @@ void loop() {
     const uint8_t miss = RfidApp::reg.count > 1 ? RfidApp::devState<Rfid>(1).missStreak : 0;
     if (miss != lastMiss) { lastMiss = miss; if (miss) { Serial.print(millis()); Serial.print(F(" miss[1]=")); Serial.println(miss); } }
   }
+  AirApp::tickBuses(now);
+  AirTicker::run(now);
   RfidTicker::run(now);
   RfidApp::Health::onEdge();
   RfidApp::Health::onTick(now);
   logRfid();
+  logAir();
   logHealth();
   if (int32_t(now - nextAir)  >= 0) { nextAir  = now + 1000; AirApp::pump(); bmpm::PublishAll<Published>::sync(); }
   static uint32_t nextIrq = 5000;

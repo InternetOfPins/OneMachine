@@ -6,11 +6,13 @@
 //                       #3 ctrl   a group of register mimics (get() reads the chip, set() writes it); the defaults are the init
 //                                 #0 config 0xF5 = 0x90 (standby 500 ms, filter x4)   #1 ctrl_meas 0xF4 = 0x57 (T x2, P x16, normal mode)
 //
-// The device's data are static members of Machine<W>::Dev (a static machine is its own type), so a node refers to them by address.
-// A node is a singleton: an ItemRef names an object, and a template argument cannot name a member of another object.
+// A machine takes its Criteria, which says which device it is: Machine<W, Addr<0x76>>. Two sensors (0x76 and 0x77) are two types, each with its
+// own statics. The device's data are static members of Machine<W, Criteria>::Dev, so a node refers to them by address. A node is a singleton.
 //
-// The App names what it publishes from outside: a Published<Code, Node, node, OnSync<fn>> is an outer node with the code and a publish tag that
-// refers to the inner node (ItemRef) without copying it. A sync pass over the published nodes calls fn(value) for each one that changed.
+// The App names what it publishes from outside. An outer node carries the code and a publish tag that refers to the inner node without copying it:
+//   PublishedAt<Code, PathRef<M, 3, 1>, OnSync<fn>>   by a compile-time path into the machine (node #3, child #1): any node, a leaf of a group too
+//   Published<Code, Node, node, OnSync<fn>>           by an ItemRef, for a standalone object
+// A sync pass over the published nodes calls fn(value) for each one that changed.
 // describe() walks the machine and the published nodes and writes what a consumer needs: the codes, their path, their fields, which notify.
 #pragma once
 #include <stdint.h>
@@ -20,6 +22,7 @@
 #include <oneMachine/discover/registry.h>
 #include <oneMachine/discover/identify.h>
 #include <oneMachine/state/face.h>
+#include <oneMachine/fail/devedge.h>
 
 namespace bmpm {
 
@@ -28,6 +31,9 @@ namespace bmpm {
   using oneMenu::MenuDef;
   using oneMenu::StaticBody;
 
+  // ---- the Criteria: which device a machine is -----------------------------------------------------------------------------------
+  template<uint8_t A> struct Addr { static constexpr uint8_t addr = A; };
+
   // ---- what a node declares about itself, for the walk (components with no behaviour) -----------------------------------------
   // T is a tag with ONEMACHINE_STATE_NAME(name, "text"): the text is a flash array
   template<typename T> struct Label { template<typename O> struct Part : O { using O::O; static constexpr state::Name label() { return T::name(); } }; };
@@ -35,7 +41,33 @@ namespace bmpm {
   template<uint8_t A, uint8_t Def> struct RegAt { template<typename O> struct Part : O { using O::O; static constexpr uint8_t regAddr = A, regDef = Def; }; };
   template<uint8_t A, uint8_t N> struct ConstAt { template<typename O> struct Part : O { using O::O; static constexpr uint8_t constAddr = A, constLen = N; }; };
   // the publish tag of an outer node: the code it is published under and the machine node it refers to
-  template<typename Code, typename Node> struct PubTag { template<typename O> struct Part : O { using O::O; using PubCode = Code; using Inner = Node; }; };
+  // Via: the PathRef it reaches the node by (void: an ItemRef)
+  template<typename Code, typename Node, typename Via = void> struct PubTag { template<typename O> struct Part : O { using O::O; using PubCode = Code; using Inner = Node; using Path = Via; }; };
+
+  // ---- capture and restore (D20, D22, D13) -------------------------------------------------------------------------------------
+  // The tail of the restore chain: every component that restores calls Base::restore() after its own, and this ends it.
+  struct RestoreEnd { template<typename O> struct Part : O { using O::O; void restore() {} void forget() {} }; };
+  // Keeps the last set() and replays it on restore(), then calls the tail. A set while the device is gone is captured too: the last intent is what
+  // comes back. forget() drops it (a part that is not the one that was here).
+  struct Capture {
+    template<typename O> struct Part : O {
+      using Base = O;
+      using O::O;
+      using Type = typename Base::Type;
+      Type last{}; bool have = false;
+      void set(Type v) { last = v; have = true; Base::set(v); }
+      void restore() { if (have) Base::set(last); Base::restore(); }
+      void forget() { have = false; Base::forget(); }
+      [[nodiscard]] bool known() const { return have; }
+      [[nodiscard]] Type captured() const { return last; }
+    };
+  };
+
+  // no failure handling: the driver polls and nothing is retried, probed or reported
+  struct Plain {
+    static constexpr bool checked = false, lifecycle = false, returnPath = false, idempotent = true;
+    template<typename E> using DevStack = fail::Bare;
+  };
 
   struct TagTemp  { ONEMACHINE_STATE_NAME(name, "temp"); };
   struct TagPress { ONEMACHINE_STATE_NAME(name, "press"); };
@@ -45,24 +77,19 @@ namespace bmpm {
   struct TagCtrlMeas { ONEMACHINE_STATE_NAME(name, "ctrl_meas"); };
   struct TagBmp   { ONEMACHINE_STATE_NAME(name, "bmp280"); };
 
-  // read-only: set() is deleted, everything else of W stays (oneData::ReadOnly inherits privately, which an ItemDef cannot compose)
-  template<typename W> struct ReadOnly {
-    template<typename O> struct Part : W::template Part<O> {
-      using Base = typename W::template Part<O>;
-      using Base::Base;
-      template<typename V> void set(V&&) = delete;
-    };
-  };
-
   struct Cal { uint16_t T1, P1; int16_t T2, T3, P2, P3, P4, P5, P6, P7, P8, P9; };
 
-  template<typename W>
+  template<typename W, typename Criteria = Addr<0x76>, typename Mode = Plain>
   struct Machine {
+    static constexpr uint8_t addr = Criteria::addr;
     // the device: its data and its register access. Static, as the machine is.
     struct Dev {
-      inline static uint8_t addr = 0;
+      static constexpr uint8_t addr = Criteria::addr;
       inline static int32_t temp = 0, press = 0;   // the last sample: 0.01 C, Pa
       inline static Cal     cal{};                  // device constants
+      inline static uint32_t ident = 0;             // the part that was here: a hash of its chip id and calibration
+      inline static bool    known = false;          //   (ident is set)
+      inline static uint16_t restored = 0, defaulted = 0;   // how often it came back and its captured state was replayed / the defaults were used
 
       static void rdN(uint8_t reg, uint8_t* out, uint8_t n) {
         using Twi = typename W::Twi;
@@ -85,10 +112,10 @@ namespace bmpm {
 
     // a register mimic: get() reads the chip, set() writes it
     template<uint8_t A> struct RegSrc { static uint8_t get() { return Dev::rd(A); } static void set(uint8_t v) { Dev::wr(A, v); } };
-    template<typename Tag, uint8_t A, uint8_t Def> using Reg = ItemDef<oneData::DataFn<RegSrc<A>>, RegAt<A, Def>, Label<Tag>>;
+    template<typename Tag, uint8_t A, uint8_t Def> using Reg = ItemDef<Capture, oneData::DataFn<RegSrc<A>>, RegAt<A, Def>, Label<Tag>, RestoreEnd>;
 
-    using Temp  = ItemDef<Scaled<2>, Label<TagTemp>,  ReadOnly<oneData::Watch<oneData::DataRef<&Dev::temp>>>>;
-    using Press = ItemDef<Scaled<2>, Label<TagPress>, ReadOnly<oneData::Watch<oneData::DataRef<&Dev::press>>>>;
+    using Temp  = ItemDef<Scaled<2>, Label<TagTemp>,  oneData::ReadOnly<oneData::Watch<oneData::DataRef<&Dev::temp>>>>;
+    using Press = ItemDef<Scaled<2>, Label<TagPress>, oneData::ReadOnly<oneData::Watch<oneData::DataRef<&Dev::press>>>>;
     using Cal_  = ItemDef<ConstAt<0x88, 24>, Label<TagCal>>;
     using Config   = Reg<TagConfig,   0xF5, 0x90>;
     using CtrlMeas = Reg<TagCtrlMeas, 0xF4, 0x57>;                       // written after config: config is written in sleep mode
@@ -100,38 +127,90 @@ namespace bmpm {
     inline static Cal_  cal;
     inline static Ctrl  ctrl{ItemDef<Label<TagCtrl>>{}, StaticBody<Config, CtrlMeas>{}};
 
-    // ---- path access: a node of the machine by position, then a register of the group ---------------------------------------
+    // ---- path access: a node of the machine by position, then a child of a group, ... -----------------------------------------------
+    // by compile-time path (D25: take the first #, call the child with the rest): the node's type, and the node itself
+    template<typename L, unsigned I> struct TypeAt;
+    template<unsigned I, typename H, typename... T> struct TypeAt<hapi::Chain<H, T...>, I> { using type = typename TypeAt<hapi::Chain<T...>, I - 1>::type; };
+    template<typename H, typename... T> struct TypeAt<hapi::Chain<H, T...>, 0> { using type = H; };
+    template<typename N, unsigned... P> struct At { using type = N; };
+    template<typename N, unsigned I, unsigned... R> struct At<N, I, R...> { using type = typename At<typename TypeAt<typename N::Body::Types, I>::type, R...>::type; };
+    template<unsigned I, unsigned... R> struct NodeAt { using type = typename At<typename TypeAt<Nodes, I>::type, R...>::type; };
+
+    template<unsigned I> static auto& node() {
+      if constexpr (I == 0) return temp; else if constexpr (I == 1) return press; else if constexpr (I == 2) return cal; else return ctrl;
+    }
+    template<unsigned I, typename B> static auto& child(B& b) { if constexpr (I == 0) return b.head; else return child<I - 1>(b.tail); }
+    template<typename N, unsigned I, unsigned... R> static auto& below(N& n) {
+      auto& c = child<I>(n.body);
+      if constexpr (sizeof...(R) == 0) return c; else return below<std::remove_reference_t<decltype(c)>, R...>(c);
+    }
+    template<unsigned I, unsigned... R> static auto& resolve() {
+      auto& n = node<I>();
+      if constexpr (sizeof...(R) == 0) return n; else return below<std::remove_reference_t<decltype(n)>, R...>(n);
+    }
+
+    // by run-time index: a node of the machine, then a register of the group
     template<typename F> static void visit(uint8_t i, F&& fn) {
       switch (i) { case 0: fn(temp); break; case 1: fn(press); break; case 2: fn(cal); break; case 3: fn(ctrl); break; default: break; }
     }
     template<typename F> static void visitReg(uint8_t i, F&& fn) { ctrl.body.visit(i, fn); }
 
-    // ---- the registers' defaults are the init: restore from defaults writes them, in order ------------------------------------
-    template<typename... R> static void writeDefaults(hapi::Chain<R...>*) { (Dev::wr(R::regAddr, R::regDef), ...); }
-    static void restoreDefaults() { writeDefaults(static_cast<typename Ctrl::Body::Types*>(nullptr)); }
+    // ---- the registers of the control group, in order -------------------------------------------------------------------------
+    template<typename F> static void eachReg(F&& fn) { for (uint8_t i = 0; i < Ctrl::Body::size(); ++i) ctrl.body.visit(i, fn); }
 
-    static void init(uint8_t addr) {
-      Dev::addr = addr;
-      Dev::wr(0xE0, 0xB6);   // soft reset: a warm restart finds the part as the last firmware left it
-      for (uint8_t i = 0; i < 200; ++i) {   // status bit 0 (im_update) is set while the NVM is copied in
-        if (!(Dev::rd(0xF3) & 1)) break;
-      }
-      uint8_t c[24] = {};
-      bool ok = false;
-      for (uint8_t i = 0; i < 5 && !(ok = Dev::readCal(c)); ++i) {}
-      if (!ok) return;   // calibration stays zero: poll() produces nothing
+    // ---- restore: capture replayed in composition order, and the defaults as the init (D13, D20, D22, D33) -----------------------
+    // restore(): each register writes its captured value, then calls the tail. forget(): the captured values are dropped (not the part that was here).
+    // restoreDefaults(): each register is set to its default, which captures it: restore from defaults is the device init.
+    static void restore() { eachReg([](auto& r) { r.restore(); }); }
+    static void forget() { eachReg([](auto& r) { r.forget(); }); }
+    static void restoreDefaults() { eachReg([](auto& r) { using R = std::remove_reference_t<decltype(r)>; r.set(R::regDef); }); }
+
+    // ---- which part is it: a hash of its chip id and its calibration (a replaced part has its own) -------------------------------
+    static uint32_t identOf(uint8_t id, const uint8_t* c) {
+      uint32_t h = 2166136261u; h = (h ^ id) * 16777619u;
+      for (uint8_t i = 0; i < 24; ++i) h = (h ^ c[i]) * 16777619u;
+      return h;
+    }
+    static void setCal(const uint8_t* c) {
       auto u = [&](uint8_t i) { return uint16_t(c[i] | (uint16_t(c[i + 1]) << 8)); };
       auto s = [&](uint8_t i) { return int16_t(u(i)); };
       auto& d = Dev::cal;
       d.T1 = u(0); d.T2 = s(2); d.T3 = s(4);
       d.P1 = u(6); d.P2 = s(8); d.P3 = s(10); d.P4 = s(12); d.P5 = s(14); d.P6 = s(16); d.P7 = s(18); d.P8 = s(20); d.P9 = s(22);
-      restoreDefaults();
     }
 
-    // one burst read of the measurement registers, compensated (datasheet 8.2, integer form) into the two values
-    static void poll() {
-      uint8_t b[6] = {};
-      Dev::rdN(0xF7, b, 6);
+    // The device is found, or is back (after it was gone, or lost its configuration). Validate: the same chip id and calibration as the part that was
+    // here. Validated, the captured state is replayed; not validated (a different part, or the first time), the slot is dropped and the defaults are
+    // the init. The calibration is device data, read again every time.
+    enum class How : uint8_t { Defaults, Restored };
+    static How bring() {
+      uint8_t c[24] = {};
+      bool ok = false;
+      for (uint8_t i = 0; i < 5 && !(ok = Dev::readCal(c)); ++i) {}
+      const uint32_t h = ok ? identOf(Dev::rd(0xD0), c) : 0;
+      if (ok && Dev::known && h == Dev::ident) {
+        setCal(c); restore(); ++Dev::restored;
+        return How::Restored;
+      }
+      forget();
+      if (ok) setCal(c); else Dev::cal = Cal{};      // no calibration: poll() produces nothing
+      Dev::ident = h; Dev::known = ok;
+      restoreDefaults(); ++Dev::defaulted;
+      return How::Defaults;
+    }
+
+    static void init() {
+      Dev::wr(0xE0, 0xB6);   // soft reset: a warm restart finds the part as the last firmware left it
+      for (uint8_t i = 0; i < 200; ++i) {   // status bit 0 (im_update) is set while the NVM is copied in
+        if (!(Dev::rd(0xF3) & 1)) break;
+      }
+      (void)bring();
+    }
+
+    static constexpr int64_t mul(int64_t v, unsigned n) { return v * (int64_t(1) << n); }
+
+    // compensate the measurement registers (datasheet 8.2, integer form) into the two values
+    static void compute(const uint8_t* b) {
       const int32_t adcP = int32_t((uint32_t(b[0]) << 12) | (uint32_t(b[1]) << 4) | (b[2] >> 4));
       const int32_t adcT = int32_t((uint32_t(b[3]) << 12) | (uint32_t(b[4]) << 4) | (b[5] >> 4));
       const auto& d = Dev::cal;
@@ -143,31 +222,65 @@ namespace bmpm {
       const int32_t tFine = v1 + v2;
       Dev::temp = (tFine * 5 + 128) >> 8;   // 0.01 C
 
+      // the datasheet's shifts are multiplications here: left-shifting a negative value is undefined before C++20 (the same code)
       int64_t p1 = int64_t(tFine) - 128000;
       int64_t p2 = p1 * p1 * int64_t(d.P6);
-      p2 = p2 + ((p1 * int64_t(d.P5)) << 17);
-      p2 = p2 + (int64_t(d.P4) << 35);
-      p1 = ((p1 * p1 * int64_t(d.P3)) >> 8) + ((p1 * int64_t(d.P2)) << 12);
-      p1 = (((int64_t(1) << 47) + p1) * int64_t(d.P1)) >> 33;
+      p2 = p2 + mul(p1 * int64_t(d.P5), 17);
+      p2 = p2 + mul(int64_t(d.P4), 35);
+      p1 = ((p1 * p1 * int64_t(d.P3)) >> 8) + mul(p1 * int64_t(d.P2), 12);
+      p1 = (mul(1, 47) + p1) * int64_t(d.P1) >> 33;
       if (p1 == 0 || adcP == 0x80000) return;   // no pressure conversion yet
       int64_t p = 1048576 - adcP;
-      p = (((p << 31) - p2) * 3125) / p1;
+      p = ((mul(p, 31) - p2) * 3125) / p1;
       p1 = (int64_t(d.P9) * (p >> 13) * (p >> 13)) >> 25;
       p2 = (int64_t(d.P8) * p) >> 19;
-      p = ((p + p1 + p2) >> 8) + (int64_t(d.P7) << 4);
+      p = ((p + p1 + p2) >> 8) + mul(int64_t(d.P7), 4);
       Dev::press = int32_t(p >> 8);        // Pa (Q24.8 >> 8)
     }
+    // one burst read of the measurement registers
+    static void poll() { uint8_t b[6] = {}; Dev::rdN(0xF7, b, 6); compute(b); }
 
     // ---- discovery: the machine is the driver's one device ----------------------------------------------------------------
-    struct Driver : discover::DriverBase<Driver, W> {
+    // Under a failure edge (Mode::checked) each poll first reads the control registers back: a register that no longer holds what was captured
+    // means the part was reset without the host knowing (Corrupt: Recover calls reinit(), which validates it and replays the capture). A part that
+    // stops answering is Absent, retried and probed; when it answers again the edge calls reinit() the same way.
+    struct Driver : discover::DriverBase<Driver, W>, fail::DevEdge<Driver, W, Mode, 1> {
       using B = discover::DriverBase<Driver, W>;
+      using Edge = fail::DevEdge<Driver, W, Mode, 1>;
       static constexpr bool polled = true;
-      static constexpr uint8_t addrLo = 0x76, addrHi = 0x77, idReg = 0xD0, id = 0x58;
-      static void init(RowId row) { Machine::init(B::addrOf(row)); }
-      static void read(RowId) { Machine::poll(); }
+      static constexpr uint8_t addrLo = Criteria::addr, addrHi = Criteria::addr, idReg = 0xD0, id = 0x58;
+      static constexpr uint8_t recoverMask = fail::bit(fail::Kind::Corrupt);
+      static constexpr bool reinitOnBusReturn = true;     // a bus that comes back may have taken the part's supply: validate it again
+      static void init(RowId) { Machine::init(); }
+      static void reinit(RowId) { (void)Machine::bring(); }
+      static void read(RowId row) { Edge::serve(row, fail::Cause::Fresh); }
+      static fail::Outcome attempt(RowId row) {
+        uint8_t b[6] = {};
+        if constexpr (Mode::checked) {
+          fail::Outcome o = fail::Outcome::Ok();
+          bool lost = false; uint8_t which = 0;
+          Machine::eachReg([&](auto& r) {
+            using R = std::remove_reference_t<decltype(r)>;
+            if (!o.isOk() || lost) return;
+            uint8_t v = 0;
+            o = Edge::checkedRead(row, R::regAddr, &v, 1);
+            if (o.isOk() && r.known() && v != r.captured()) { lost = true; which = R::regAddr; }
+          });
+          if (!o.isOk()) return o;
+          if (lost) return fail::Outcome::Fail(fail::Kind::Corrupt, which);
+          o = Edge::checkedRead(row, 0xF7, b, 6);
+          if (!o.isOk()) return o;
+        } else {
+          Dev::rdN(0xF7, b, 6);
+        }
+        compute(b);
+        return fail::Outcome::Ok();
+      }
     };
     // the BME280 answers 0x60 at the same register: a second entry, the same driver
-    using Entries = hapi::Chain<discover::Use<discover::Own, Driver>, discover::Use<discover::IdProbe<0xD0, 0x60, 0x76, 0x77>, Driver>>;
+    using UseBmp = discover::Use<discover::Own, Driver>;
+    using UseBme = discover::Use<discover::IdProbe<0xD0, 0x60, Criteria::addr, Criteria::addr>, Driver>;
+    using Entries = hapi::Chain<UseBmp, UseBme>;
 
     // ---- the index of a node in the machine -------------------------------------------------------------------------------
     template<typename N, typename L> struct IndexOf;
@@ -182,6 +295,26 @@ namespace bmpm {
   // Notify: OnSync<fn> (the value moves outside set) or none. Outer node = Notify..., the reference, the code.
   template<typename Code, typename Node, Node& ref, typename... Notify>
   using Published = ItemDef<Notify..., oneMenu::ItemRef<Node, ref>, Label<Code>, PubTag<Code, Node>>;
+
+  // a node of a machine by compile-time path: P is the position in the machine, then in each group below it. It reaches any node, a leaf of
+  // a group too, by resolving the path to the node's singleton (or to the child inside a group) on use. get(), changed() and sync() are the node's.
+  template<typename M, unsigned... P>
+  struct PathRef {
+    static_assert(sizeof...(P) > 0, "PathRef: a path names a node of the machine");
+    using Node = typename M::template NodeAt<P...>::type;
+    static constexpr unsigned depth = sizeof...(P);
+    static constexpr unsigned path[sizeof...(P)] = {P...};
+    template<typename O> struct Part : O {
+      using O::O;
+      static Node& ref() { return M::template resolve<P...>(); }
+      static decltype(auto) get() { return ref().get(); }
+      [[nodiscard]] static bool changed() { return ref().changed(); }
+      static void sync() { ref().sync(); }
+    };
+  };
+  // an outer node reaching its inner node by path
+  template<typename Code, typename Ref, typename... Notify>
+  using PublishedAt = ItemDef<Notify..., Ref, Label<Code>, PubTag<Code, typename Ref::Node, Ref>>;
 
   // which notify components an outer node carries
   template<typename T> struct OnSyncOf : std::false_type {};
@@ -200,8 +333,8 @@ namespace bmpm {
   //     #3 ctrl  group 2
   //       #0 config  reg 0xF5 default 0x90 rw
   //   published
-  //     temp  -> 1/76/0  notify sync  ro scaled 2
-  //     air   -> 1/76/3  group 2
+  //     temp  -> 1/118/0  notify sync  ro scaled 2
+  //     air   -> 1/118/3  group 2
   // A path is <bus>/<identity of the device>/<node>, then a register inside a group; the identity is the device's address.
   template<typename T, typename = void> struct HasDecimals : std::false_type {};
   template<typename T> struct HasDecimals<T, std::void_t<decltype(T::decimals)>> : std::true_type {};
@@ -232,26 +365,28 @@ namespace bmpm {
     template<typename... N> void nodes(hapi::Chain<N...>*) { unsigned i = 0; ((str("  #"), dec(i++), put(' '), name(N::label()), fields<N>(), put('\n')), ...); }
     template<typename... R> void regs(hapi::Chain<R...>*) { unsigned i = 0; ((str("    #"), dec(i++), put(' '), name(R::label()), fields<R>(), put('\n')), ...); }
 
-    template<typename M> void machine(uint8_t addr) {
-      str("machine "); name(TagBmp::name()); str(" at "); hex(addr); put('\n');
+    template<typename M> void machine() {
+      str("machine "); name(TagBmp::name()); str(" at "); hex(M::addr); put('\n');
       nodes(static_cast<typename M::Nodes*>(nullptr));
       regs(static_cast<typename M::Ctrl::Body::Types*>(nullptr));
     }
 
-    template<typename M, typename Pub> void published(uint8_t bus, uint8_t addr) {
+    template<typename M, typename Pub> void published(uint8_t bus) {
       using Inner = typename Pub::Inner;
-      str("  "); name(Pub::PubCode::name()); str(" -> "); dec(bus); put('/'); dec(addr); put('/'); dec(unsigned(M::template IndexOf<Inner, typename M::Nodes>::value));
+      str("  "); name(Pub::PubCode::name()); str(" -> "); dec(bus); put('/'); dec(M::addr);
+      if constexpr (std::is_void<typename Pub::Path>::value) { put('/'); dec(unsigned(M::template IndexOf<Inner, typename M::Nodes>::value)); }
+      else for (unsigned i = 0; i < Pub::Path::depth; ++i) { put('/'); dec(Pub::Path::path[i]); }
       str(NotifiesSync<Pub>::value ? " notify sync" : " silent"); fields<Inner>(); put('\n');
     }
-    template<typename M, typename... Pub> void publishedAll(hapi::Chain<Pub...>*, uint8_t bus, uint8_t addr) { (published<M, Pub>(bus, addr), ...); }
+    template<typename M, typename... Pub> void publishedAll(hapi::Chain<Pub...>*, uint8_t bus) { (published<M, Pub>(bus), ...); }
   };
 
-  // M: the machine; Pubs: Chain<published nodes>; bus: the machine's position in the App; addr: the device's identity on its bus
-  template<typename M, typename Pubs, typename P> void describe(P& put, uint8_t bus, uint8_t addr) {
+  // M: the machine (its Criteria is the device's identity in the path); Pubs: Chain<published nodes>; bus: the machine's position in the App
+  template<typename M, typename Pubs, typename P> void describe(P& put, uint8_t bus) {
     Walk<P> w{put};
-    w.template machine<M>(addr);
+    w.template machine<M>();
     w.str("published\n");
-    w.template publishedAll<M>(static_cast<Pubs*>(nullptr), bus, addr);
+    w.template publishedAll<M>(static_cast<Pubs*>(nullptr), bus);
   }
 
 }
