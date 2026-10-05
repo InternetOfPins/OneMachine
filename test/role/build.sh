@@ -77,6 +77,10 @@ if have avr-g++ && have simavr; then
     printf '%s' "$o" | grep -q '^OK' || { bad "avr_cost V$v" "the roles did not reach the device: $(printf '%s' "$o" | head -c 200)"; continue; }
     name=(Fixed Found Pinned "Found + link + descriptions" "no role layer (the app writes the channels)" "Found, tuned" "Found, tuned + link + descriptions")
     note "${name[$v]}" "$sz, apply of 6 roles $(printf '%s' "$o" | awk '/^APPLY/{print $2}') cycles, after a scan $(printf '%s' "$o" | awk '/^BIND/{print $2}') cycles"
+    if [ "$v" = 3 ]; then   # the role layer with its link and no payload app is the image it was before the payload hook existed
+      if r=$(../tools/baseline.sh check role_link_avr "$W/c3.elf" 2>&1); then ok "role::Link without a payload app: the image is its baseline (role_link_avr)"
+      else bad "role_link_avr" "$(printf '%s' "$r" | head -3 | tr '\n' ' ')"; fi
+    fi
   done
 else note AVR "no avr-g++/simavr: the cost was not measured"; fi
 

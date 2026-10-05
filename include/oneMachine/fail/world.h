@@ -17,6 +17,25 @@ namespace fail {
     }
   };
 
+  // A driver with `static constexpr bool serves` and service(row, now): the loop's step that finishes what a poll started (an interrupt-driven
+  // command). A driver that does not serve costs nothing: the fold does not look at its rows.
+  template<typename D, typename = void> struct Serves : std::false_type {};
+  template<typename D> struct Serves<D, std::void_t<decltype(D::serves)>> : std::bool_constant<D::serves> {};
+
+  // W: the world (reg); Ds: Chain<drivers>. Direct calls only, like TickFold.
+  template<typename W, typename Ds> struct ServiceFold;
+  template<typename W, typename... D> struct ServiceFold<W, hapi::Chain<D...>> {
+    static void run([[maybe_unused]] uint32_t now) { (one<D>(now), ...); }
+  private:
+    template<typename Dr> static void one([[maybe_unused]] uint32_t now) {
+      if constexpr (Serves<Dr>::value) {
+        for (RowId r = 0; r < W::reg.count; ++r)
+          if (W::reg.rows[r].drv == discover::instOf<Dr>()) Dr::service(r, now);
+      }
+    }
+  };
+  template<typename W, typename Ds> using Services = ServiceFold<W, Ds>;
+
   // the drivers whose stack has tick(now); empty (and free) when no driver chose a ticking component
   template<typename W, typename Ds> using Ticks = TickFold<W, hapi::Eval<hapi::Filter<TicksStack>, Ds>>;
 
