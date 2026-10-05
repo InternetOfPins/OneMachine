@@ -20,15 +20,63 @@ Wemos D1 mini (ESP8266), everything at 3.3V.
 | D6 (GPIO12) | MISO | |
 | D7 (GPIO13) | MOSI | |
 | D8 (GPIO15) | SDA (its chip select) | |
-| D0 or 3V3 | RST | D0 is held high by the sketch; it must not be a chip select |
+| D4 (GPIO2) | RST | held high by the sketch (the fault keys pull it low); or 3V3 |
+| D0 (GPIO16) | IRQ | |
 | D2 (GPIO4) | | SDA |
 | D1 (GPIO5) | | SCL |
 
 Slot 1 is D3 (GPIO0) with nothing on it: the scan reports it empty.
 
-Optional: D4 (GPIO2) is held low as a supply switch for the RC522's VCC (a PNP transistor, for example a 2N2907: emitter
-to 3V3, collector to VCC, base through 1 k to D4; D4 is high at reset, so the RC522 is off until the sketch starts).
-Keys `x` and `l` below cut it for 3 s or 30 s. Without a switch there, they change nothing.
+D0 (GPIO16) is the RC522's IRQ input (push-pull, active low, set by the driver). A poll starts its command and returns; the
+loop's `fail::Services` step finishes it when the line is asserted, or after 40 ms, so nothing in the loop waits for the reader. The
+ESP8266 has no interrupt on GPIO16, so the line is sampled (`irq::Sampled<16>`); on a pin that has one, `irq::IsrFlag<Pin>` sets a
+flag in the ISR instead. The RxIRq/TimerIRq bits tell a card from none. The sketch also uses the optional line check: a line that
+disagrees with the register (not connected, stuck) is reported to the failure edge as the delivery's fault, and that row polls the
+register from then on (`rc522::PollOnLineFault`); without the fallback the same fault is the chip's and Recover initialises it. The
+interrupt part is optional as a whole: a mode without `using Irq` is the polling driver, unchanged. Requests are enabled only while a
+command runs. Keep the IRQ off the boot strapping pins (D3, D4, D8, rejected at compile time): the RC522 keeps its state across a
+reset of the board, and a pending request would hold such a pin low at the next boot.
+
+## The air sensor as a machine
+
+The BMP280/BME280 is a static machine of OneMenu `ItemDef` nodes (`src/bmp280_machine.h`), and takes its Criteria: `Machine<W, Addr<0x76>>`
+(a second sensor at 0x77 is a second type with its own data). Nodes: `#0 temp` and `#1 press` (read-only values that move when the sensor is
+read), `#2 cal` (the device's calibration constants: read when it is found, never state) and `#3 ctrl`, a group of register mimics whose `get()`
+reads the chip and `set()` writes it; their defaults are the init.
+
+The App publishes nodes under its own codes with `PublishedAt<Code, PathRef<Machine, 3, 1>, OnSync<fn>>`: an outer node that reaches the inner one
+by a compile-time path (node #3, child #1; any node, a leaf of a group too) without copying it. A sync pass calls `fn(value)` for each published
+value that changed, so `temp=` and `press=` appear only when they move. Key `d` prints the description: the machine's nodes, then the published
+codes with their path (`<bus>/<address>/<node>[/<child>]`), fields and whether they notify.
+
+Each register keeps the last value set (`Capture`), also while the sensor is gone. The sensor is under failure handling: each poll reads the control
+registers back, and a register that no longer holds what was set means the part was reset behind the host's back. When the sensor is back, after
+that or after it was unplugged, it is validated (the same chip id and calibration as the part that was here): validated, the last settings are
+written again; another part, the settings are dropped and the defaults are the init. The log shows `STATUS <ms> air <from>-><to>`, then
+`air restored #n` or `air defaults #n`.
+
+Keys: `a` reads the control group by path, `o` sets `ctrl_meas` to oversampling x1, `q` to 0x2B (also while the sensor is unplugged), `r` writes the
+registers' defaults, `x` resets the sensor behind the host's back.
+
+## A Python consumer over the serial port
+
+`pio run -e d1_mini_link -t upload` builds the same sketch with the serial port carrying the link (`role/link.h`, with payload ops) instead of the log. `python/onemachine` reads it, with the package's own `StreamLink`:
+
+```python
+import serial
+from onemachine import Tree, StreamLink
+ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=2)
+m = Tree(StreamLink(ser.read, ser.write, ser.flush))   # reads the description
+m.temp, m.press                                        # 27.62, 1026.68: scaled as the description says (0.01 C, 0.01 hPa)
+m.air.ctrl_meas = 0x27                                 # set by code; read-only and out-of-range are refused here, before anything is sent
+m.changes()                                            # [Change('temp', 27.61, 2761), Change('card', 4062320374, ...), Change('air', status='stale')]
+m.status('air')                                        # 'alive', 'stale' or 'gone': the part's row; m.temp raises Stale when it is not alive
+```
+
+Ops: `d` the description (each code with the status of its row), `v` get by code (the status first, then the value; a part that is not alive answers its last value), `w` set by code (through the node: its limits, its capture, its register), `n` the changes since the last `n` (a value, or a status change of a row), `f` one
+fault key (`x` resets the air sensor behind the host's back, `v` and `p` reset the RFID reader). The changes wait in a `fail::Buffer` of 8: when a consumer
+does not read for a while the newest are refused and counted, and the reply of `n` says how many it missed (`m.missed`); read the values again with
+`m.temp`. `examples/spi/rig_session.py` is a session on the real board; `test/link/build.sh` runs the same consumer against a simulated one.
 
 ## Build and flash
 
@@ -69,13 +117,12 @@ first three bytes (cascade level 1 only).
 
 ## Faults
 
-Type a key in the serial monitor to drive RC522 RST (D0) from the sketch:
+Type a key in the serial monitor to drive RC522 RST (D4) from the sketch:
 
 | Key | Fault | Log |
 | --- | --- | --- |
 | `v` | RST low for 3 s: the reader vanishes | `rfid[1] stale`, `card[1]=0` if a card was held, then `rfid[1] alive, init #n` after release |
 | `p` | RST low for 1 ms: a silent reset, the ID still answers | `rfid[1] reinit, init #n`, the row stays Alive |
-| `x`, `l` | supply off for 3 s, or 30 s (with the switch on D4) | as `v`; the chip may still answer through its signal pins, so it can flap before it goes quiet |
 
 A card that picks a new UID each time its field restarts (random-UID tags, phones; UIDs starting `08`) shows a new
 UID after every fault.
