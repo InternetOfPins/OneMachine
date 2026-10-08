@@ -287,7 +287,7 @@ class Facts:
 
 def role_facts(m, name):
     """The Facts of role `name` of Machine m, or KindError. Checks the description against the kind: only the lines the kind prints, the fields it reports and
-    commands present with the types it needs, the bound param, distinct values, unique labels, a positive scale for a scaled value, a flag that is unsigned."""
+    commands present with the types it needs, the bound param, distinct values, unique labels, a positive scale, a flag that is unsigned."""
     info = m.roles[name]
     if info.kind not in KINDS: raise KindError('role %s is of kind %r; python/onemachine has facts for %s' % (name, info.kind, ', '.join(sorted(KINDS))))
     k, f = KINDS[info.kind], Facts(name, info.kind)
@@ -331,9 +331,9 @@ def role_facts(m, name):
         for line, d in (('scale', info.scales), ('unit', info.units)):
             if set(d) != {k.report}: refuse('the description needs one `%s` line, for the field %r (it has %s)' % (line, k.report, sorted(d) or 'none'))
         f.scale, f.unit = info.scales[k.report], info.units[k.report]
+        if f.scale[0] <= 0 or f.scale[1] <= 0: refuse('scale %d/%d is not positive' % f.scale)
         if info.kind == 'scaled':
             if k.upper not in info.params: refuse('no param %r in its description, and the %s kind says it bounds %r' % (k.upper, info.kind, k.command))
-            if f.scale[0] <= 0 or f.scale[1] <= 0: refuse('scale %d/%d is not positive' % f.scale)
             hi = info.params[k.upper]
             if not (0 <= hi <= thi): refuse('bound [0, %d] does not fit the %s field %r' % (hi, f.command_type, k.command))
             f.low, f.high = 0, hi
