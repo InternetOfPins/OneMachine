@@ -8,6 +8,7 @@
     m.push()                                       # sent; the device applies it at its next cycle boundary
     m.poll().x.pos_um                              # the report; `live` is False for a role whose device is not there
     m.roles['x'].tuned                             # a role::Tuned role: its parameters can change at run time
+    f = role_facts(m, 'x')                         # what the description says about x, read through its kind (below)
     m.tune.x.max_um = 200000; m.retune()           # within the firmware's limits (the `param` values); outside them: OutOfLimits
 
 Where a role is (which device, which bus, which channel) is the device's business: the `at` lines are shown to people (m.where),
@@ -15,6 +16,9 @@ never used here. A consumer only reconfigures when the device's roles change: pu
 and keep every command value whose role and field still exist. A role this consumer has written that is gone, or has another kind,
 raises RoleChanged instead of being retargeted."""
 import re, struct, subprocess
+from decimal import Decimal
+from fractions import Fraction
+from collections import namedtuple
 from .schema import Schema, SchemaError, BadHash
 
 OK, BAD_HASH, BAD_LENGTH, BAD_VALUE, UNKNOWN, TOO_LONG = 0, 1, 2, 3, 0x80, 0x81
@@ -219,3 +223,123 @@ class Machine:
     def __getattr__(self, name):                   # m.x is the command of role x
         if name in ('cmd', 'description', 'tune', 'tune_schema') or name.startswith('_'): raise AttributeError(name)
         return getattr(self.cmd, name)
+
+
+# ---- what a kind says about its roles, whatever the consumer: which field is reported and commanded, what bounds it, which values it takes,
+# how a raw integer is presented. A consumer keeps its protocol's words (types, constraints, units) in its own table and reads these facts.
+Kind = namedtuple('Kind', 'report command upper lines')     # the report field, the command field (None: report only), the param bounding the command field (0..param), the description lines the kind prints
+KINDS = {
+    'switch':   Kind('on',    'on',    None,  ()),
+    'light':    Kind('level', 'level', 'max', ()),
+    'discrete': Kind('value', 'value', None,  ('value',)),
+    'select':   Kind('index', 'index', None,  ('value',)),
+    'analog':   Kind('raw',   None,    None,  ('scale', 'unit')),
+    'text':     Kind('text',  'text',  None,  ()),
+    'scaled':   Kind('raw',   'raw',   'max', ('scale', 'unit')),
+    'action':   Kind('fired', 'fire',  None,  ()),
+}
+INT_RANGE = {'u8': (0, 255), 'u16': (0, 65535), 'u32': (0, 2**32 - 1), 'i8': (-128, 127), 'i16': (-32768, 32767), 'i32': (-2**31, 2**31 - 1)}
+
+class KindError(ValueError):
+    """A role's description, command or report does not hold what its kind says it does; the message names the role and the thing."""
+
+class Facts:
+    """One role read through its kind (role_facts). Attributes, None or empty where the kind has none:
+    report, command      the report field and the command field (command is None for a report-only kind)
+    low, high            the raw range the kind bounds the command field to: light 0..max, scaled 0..max
+    values, labels       the raw values the role takes, and their labels (a select: parallel tuples)
+    scale, unit          (num, den) and the unit symbol: presented = raw * num / den
+    size                 the length of a text role's byte array
+    report_fields        the names of the role's report fields (live, and clamped for a light)
+    command_type         the command field's integer type (u16, ...)"""
+    def __init__(self, name, kind):
+        self.name, self.kind, k = name, kind, KINDS[kind]
+        self.report, self.command = k.report, k.command
+        self.low = self.high = self.scale = self.unit = self.size = self.command_type = None
+        self.values, self.labels, self.report_fields = (), (), ()
+    def __repr__(self): return 'Facts(%s %s)' % (self.name, self.kind)
+
+    def presented(self, raw):
+        """raw -> the presented value, exactly (a Fraction): raw * num / den"""
+        return Fraction(int(raw) * self.scale[0], self.scale[1])
+    def to_raw(self, value):
+        """presented -> raw: the exact rational of the shortest decimal that round-trips the client's number, times den / num, to the nearest integer,
+        halves away from zero. Integer arithmetic only: no round(), no float multiply."""
+        x = Fraction(Decimal(repr(float(value)))) * self.scale[1] / self.scale[0]
+        p, q = abs(x.numerator), x.denominator
+        r = (2 * p + q) // (2 * q)
+        return -r if x < 0 else r
+    def label_of(self, raw):
+        for v, label in zip(self.values, self.labels):
+            if v == int(raw): return label
+        raise LinkError('role %s: the report says %d, which no `value` line names' % (self.name, raw))
+    def raw_of(self, label):
+        for v, l in zip(self.values, self.labels):
+            if l == label: return v
+        raise KeyError(label)
+    def pack_text(self, text):
+        """a text -> the command's byte array: ASCII, NUL-padded (nothing of an older, longer text stays); ValueError outside the buffer or printable ASCII"""
+        b = text.encode('ascii')
+        if len(b) > self.size or not all(0x20 <= c <= 0x7e for c in b): raise ValueError('text outside the buffer or printable ASCII')
+        return list(b) + [0] * (self.size - len(b))
+    def unpack_text(self, array):
+        return bytes(array).split(b'\0', 1)[0].decode('ascii', 'replace')
+
+def role_facts(m, name):
+    """The Facts of role `name` of Machine m, or KindError. Checks the description against the kind: only the lines the kind prints, the fields it reports and
+    commands present with the types it needs, the bound param, distinct values, unique labels, a positive scale for a scaled value, a flag that is unsigned."""
+    info = m.roles[name]
+    if info.kind not in KINDS: raise KindError('role %s is of kind %r; python/onemachine has facts for %s' % (name, info.kind, ', '.join(sorted(KINDS))))
+    k, f = KINDS[info.kind], Facts(name, info.kind)
+    def refuse(why): raise KindError('role %s (%s): %s' % (name, info.kind, why))
+    for line, present in (('value', info.values), ('scale', info.scales), ('unit', info.units)):
+        if present and line not in k.lines: refuse('its description has %s lines, which the %s kind does not print' % (line, info.kind))
+    fields = {}
+    for what, schema, field in (('command', m.command_schema, k.command), ('report', m.report_schema, k.report)):
+        if field is None: continue
+        layer = schema.layer(name)
+        fld = next((x for x in layer.fields if x.name == field), None) if layer else None
+        if info.kind == 'text':
+            if fld is None or not fld.n or fld.base != 'u8': refuse('its %s has no u8 array %r' % (what, field))
+        elif fld is None or fld.n: refuse('its %s has no scalar %r' % (what, field))
+        elif info.kind == 'switch' and fld.base != 'bool': refuse('its %s %r is %s, not bool' % (what, field, fld.base))
+        elif info.kind != 'switch' and fld.base not in INT_RANGE: refuse('its %s %r is %s, which is no integer' % (what, field, fld.base))
+        fields[what] = fld
+    f.report_fields = tuple(x.name for x in m.report_schema.layer(name).fields)
+    if k.command is not None:
+        f.command_type = fields['command'].base
+        tlo, thi = INT_RANGE.get(f.command_type, (0, 1))
+    if info.kind == 'light':
+        if k.upper not in info.params: refuse('no param %r in its description, and the %s kind says it bounds %r' % (k.upper, info.kind, k.command))
+        lo, hi = 0, info.params[k.upper]
+        if not (tlo <= lo <= hi <= thi): refuse('bound [%d, %d] does not fit the %s field %r' % (lo, hi, f.command_type, k.command))
+        f.low, f.high = lo, hi
+    elif info.kind in ('discrete', 'select'):
+        if not info.values: refuse('no %s in its description (`value` lines)' % ('allowed values' if info.kind == 'discrete' else 'values'))
+        vals = [v for v, _ in info.values]
+        if info.kind == 'discrete' and any(label is not None for _, label in info.values): refuse('a value has a label, which the discrete kind does not use')
+        if info.kind == 'select':
+            unlabelled = [v for v, label in info.values if label is None]
+            if unlabelled: refuse('value %s has no label' % unlabelled[0])
+        if len(set(vals)) != len(vals) or not all(tlo <= v <= thi for v in vals): refuse('values %s are not distinct values of the %s field %r' % (vals, f.command_type, k.command))
+        if info.kind == 'select':
+            labels = [label for _, label in info.values]
+            if len(set(labels)) != len(labels): refuse('two values have the same label (%s)' % ', '.join(labels))
+            f.labels = tuple(labels)
+        f.values = tuple(vals)
+    elif info.kind in ('analog', 'scaled'):
+        for line, d in (('scale', info.scales), ('unit', info.units)):
+            if set(d) != {k.report}: refuse('the description needs one `%s` line, for the field %r (it has %s)' % (line, k.report, sorted(d) or 'none'))
+        f.scale, f.unit = info.scales[k.report], info.units[k.report]
+        if info.kind == 'scaled':
+            if k.upper not in info.params: refuse('no param %r in its description, and the %s kind says it bounds %r' % (k.upper, info.kind, k.command))
+            if f.scale[0] <= 0 or f.scale[1] <= 0: refuse('scale %d/%d is not positive' % f.scale)
+            hi = info.params[k.upper]
+            if not (0 <= hi <= thi): refuse('bound [0, %d] does not fit the %s field %r' % (hi, f.command_type, k.command))
+            f.low, f.high = 0, hi
+    elif info.kind == 'text':
+        if fields['command'].n != fields['report'].n: refuse('its command buffer is %d bytes and its report %d' % (fields['command'].n, fields['report'].n))
+        f.size = fields['command'].n
+    elif info.kind == 'action':
+        if INT_RANGE[f.command_type][0] != 0: refuse('its command %r (%s) is signed; the flag is 0 or 1 of an unsigned field' % (k.command, f.command_type))
+    return f

@@ -5,7 +5,7 @@
 #   rules   each rule of role::Machine and the kinds is a compile error with its own message (g++, clang++, avr-g++)
 #   python  python/onemachine drives the test machine as a consumer that knows only role names (check.py), across four firmware
 #           variants (rewired, a role added, a role removed), over a pipe and in-process through ctypes (CtypesLink); its Schema against test/state's native peers (check_schema.py);
-#           examples/python's drive.py against that example's host build
+#           examples/python's drive.py against that example's host build; python/onemachine's facts for each kind (facts_check.py) against examples/sila's host build
 #   AVR     avr-g++ -Os atmega328p in simavr: the role layer's cost per request and per scan, Fixed vs Found vs Pinned, the link, and
 #           role::Tuned (run-time parameters)
 # HAPI=<hapi/include> overrides the HAPI checkout used (default: next to this repo).
@@ -73,6 +73,9 @@ if have python3; then
   if g++ -std=c++17 -O2 -Wall -Wextra -Werror "${F[@]}" ../../examples/python/host/main.cpp -o "$W/exhost" 2>"$W/err"; then
     python3 ../../examples/python/drive.py --sim "$W/exhost" --check > "$W/ex.out" 2>&1 && ok "examples/python: drive.py against the host build, $(grep -c '^  ok' "$W/ex.out") checks" || bad "examples/python drive.py" "$(grep -E 'FAIL|Error' "$W/ex.out" | head -3)"
   else bad "examples/python host build" "$(grep -m1 error "$W/err")"; fi
+  if g++ -std=c++17 -O2 -Wall -Wextra -Werror "${F[@]}" ../../examples/sila/host/main.cpp -o "$W/silahost" 2>"$W/err"; then
+    python3 facts_check.py "$W/silahost" > "$W/facts.out" 2>&1 && ok "facts_check.py: $(grep -c '^  ok' "$W/facts.out") checks of what a kind says about a role, against examples/sila's host build" || bad "facts_check.py" "$(grep FAIL "$W/facts.out" | head -3)"
+  else bad "examples/sila host build" "$(grep -m1 error "$W/err")"; fi
   g++ -std=c++17 -O1 "${F[@]}" -I../state ../state/host_peer.cpp -o "$W/hp" && g++ -std=c++17 -O1 "${F[@]}" -I../state ../state/array_check.cpp -o "$W/ap" &&
     { python3 check_schema.py "$W/hp" "$W/ap" > "$W/sc.out" 2>&1 && ok "check_schema.py: $(grep -c '^ok' "$W/sc.out") checks against the native state peers" || bad "check_schema.py" "$(grep FAIL "$W/sc.out" | head -3)"; }
 else note python "no python3: the consumer checks did not run"; fi
