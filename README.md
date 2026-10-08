@@ -3,7 +3,9 @@
 Runtime device discovery, failure handling, ROS-shaped composition, typed state and roles for [HAPI](https://github.com/InternetOfPins/HAPI):
 scan a bus once, get a compile-time-composed table of rows back — one indirect call in `pump()`, no per-device virtual
 dispatch, no dynamic allocation. Failure edges (retry, recover, reprobe) and a health monitor (flap rate, bus cost,
-quarantine, disconnect) compose over those rows the same way, at zero cost when not chosen.
+quarantine, disconnect) compose over those rows the same way, at zero cost when not chosen. A machine describes itself over its
+link, and consumers serve it to other worlds from that description alone: SiLA 2 for lab software, MCP for AI assistants, with
+nothing protocol-specific on the board.
 
 Part of the [InternetOfPins](https://github.com/InternetOfPins) project family. Built on
 [HAPI](https://github.com/InternetOfPins/HAPI) (the composition core) and [OneBus](https://github.com/InternetOfPins/OneBus)
@@ -225,7 +227,7 @@ And one on the output side, needing only a Nano:
 - [`examples/python`](examples/python) — outputs driven by role name from Python over USB serial, or on the host with the
   pins simulated: the consumer side of `role::`.
 
-And one that serves a machine to lab software:
+And two consumers of the same machine, from its description alone:
 
 - [`examples/sila`](examples/sila) — one field of each kind (switch, level, discrete, select, analog volts, text, command in presented
   units, action) served as SiLA 2 features by a Python gateway, from a Nano or on the host with the endpoints simulated.
@@ -250,7 +252,10 @@ its own. The health monitor's full report → quarantine → disconnect sequence
 hardware-verifies the piece a hand test can actually reach -- correct fault attribution and flap tracking. Native
 and AVR builds are both part of every check this library carries forward from its own development.
 
-I2C is the only bus implemented so far, but OneMachine itself is component agnostic: any bus, or any other component,
+Roles and their consumers are proven on a Nano: an independent SiLA 2 client and Claude (through MCP) read all eight roles and
+command the seven that take a command, with out-of-range values refused before anything reaches the board.
+
+OneMachine itself is component agnostic: any bus, or any other component,
 that fulfils its contract works within the system. What OneMachine relies on is the contract, not a particular derivation.
 
 ## License
