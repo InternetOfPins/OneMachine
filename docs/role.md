@@ -76,6 +76,17 @@ param white safe 0
 at white pca9685 0x40 behind 0x70/2 #0
 ```
 
+A kind may also print what its values mean (`Params`, in `role/face.h`; all inside the machine hash):
+
+```
+value mode 0 off            a value the role takes, with an optional label (v.value(raw, label))
+scale vin raw 5 1023        presented = raw * num / den, for a field of the role (v.scale(field, num, den))
+unit vin raw V              the unit symbol of a field of the role (v.unit(field, symbol))
+```
+
+The device holds integers only; the presented value is the consumer's arithmetic. A label is 1 to 32 of `A-Z a-z 0-9 _ -`
+(`python/onemachine` refuses the description otherwise). A unit symbol is one token of `A-Z a-z 0-9 / * ^ . % -`, 1 to 16 characters (the same refusal). Kinds that print none of these lines print exactly what they did before.
+
 So rewiring, a device moving to another channel, or new firmware with the same roles changes nothing on the consumer side: the
 same command frame is accepted as is (`test/role/check.py`, "rewired firmware"). When the roles do change, the device answers
 BadHash; the consumer re-reads, keeps every value whose role and field still exist, and is told (RoleChanged) when a role it

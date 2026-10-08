@@ -14,7 +14,7 @@ Where a role is (which device, which bus, which channel) is the device's busines
 never used here. A consumer only reconfigures when the device's roles change: push() and poll() re-read the descriptions on BadHash
 and keep every command value whose role and field still exist. A role this consumer has written that is gone, or has another kind,
 raises RoleChanged instead of being retargeted."""
-import struct, subprocess
+import re, struct, subprocess
 from .schema import Schema, SchemaError, BadHash
 
 OK, BAD_HASH, BAD_LENGTH, BAD_VALUE, UNKNOWN, TOO_LONG = 0, 1, 2, 3, 0x80, 0x81
@@ -90,11 +90,19 @@ def _carry(old, schema, new):
     return new
 
 class RoleInfo:
-    def __init__(self, name, kind): self.name, self.kind, self.params, self.tuned = name, kind, {}, False
+    def __init__(self, name, kind):
+        self.name, self.kind, self.params, self.tuned = name, kind, {}, False
+        self.values, self.scales, self.units = [], {}, {}     # value lines (raw, label|None) in order; field -> (num, den); field -> symbol
     def __repr__(self): return 'Role(%s %s %r%s)' % (self.name, self.kind, self.params, ' tuned' if self.tuned else '')
+
+LABEL = re.compile(r'[A-Za-z0-9_-]{1,32}')          # a value's label: no space, no quote, no markup; the line is split on spaces
+SYMBOL = re.compile(r'[A-Za-z0-9/*^.%-]{1,16}')
 
 class Description:
     """The machine description (role/face.h): refs, roles with kind and parameters, and where each is (for people only)."""
+    def _role(self, name, line):
+        if name not in self.roles: raise SchemaError('line for a role not declared above it: %r' % line)
+        return self.roles[name]
     def __init__(self, text):
         lines = [l for l in text.split('\n') if l]
         if not lines or lines[0] != 'machine 1': raise SchemaError('not a machine 1 description')
@@ -113,6 +121,18 @@ class Description:
             elif word == 'param':
                 role, key, value = rest.split(' '); self.roles[role].params[key] = int(value)
             elif word == 'tune': self.roles[rest].tuned = True
+            elif word == 'value':
+                role, raw, *label = rest.split(' ')
+                if len(label) > 1 or (label and not LABEL.fullmatch(label[0])): raise SchemaError('bad value line %r' % l)
+                self._role(role, l).values.append((int(raw), label[0] if label else None))
+            elif word == 'scale':
+                role, field, num, den = rest.split(' ')
+                if int(den) == 0: raise SchemaError('scale with denominator 0: %r' % l)
+                self._role(role, l).scales[field] = (int(num), int(den))
+            elif word == 'unit':
+                role, field, symbol = rest.split(' ')
+                if not SYMBOL.fullmatch(symbol): raise SchemaError('bad unit symbol in %r' % l)
+                self._role(role, l).units[field] = symbol
             else: raise SchemaError('unknown line %r' % l)
         if h != self.hash: raise SchemaError('description says hash %08x, its lines hash to %08x' % (self.hash, h))
 
