@@ -73,7 +73,8 @@ c.Duty.SetValue(100.01)                # ValidationError: the server refuses it,
 | `note` (`text`) | `text`, a `u8[16]` array | `Note`: `Text`, `SetText(Text)` | String, MaximalLength 16, Pattern `[ -~]*` (printable ASCII) |
 | `duty` (`scaled`) | `raw`, with `max`, a `scale` and a `unit` line | `Duty`: `Value`, `SetValue(Value)` | Real, Unit % (dimensionless, factor 0.01), minimum 0, maximum 100 = `max` * 1 / 10 |
 
-The kinds `light` and `switch` are OneMachine's (`role/kinds.h`); the other six are in `src/kinds.h`. The lines a kind prints
+The kinds `light` and `switch` are OneMachine's (`role/kinds.h`); the other six are in `src/kinds.h`. The rules any such consumer follows, and how to add a kind or another consumer, are in
+[docs/consumers.md](../../docs/consumers.md). The lines a kind prints
 in the machine description (`value`, `scale`, `unit`) are described in [docs/role.md](../../docs/role.md). One generated
 definition (`Mode`, trimmed):
 
@@ -105,10 +106,11 @@ description (a role, a label, a unit) is a different server.
   a tuned role, a description line the kind's row does not use, a unit symbol the unit table (`UNITS`: `V` and `%`) does not
   have, a label used twice, or a scale whose bound is not a finite decimal: the gateway exits with a message that names the
   role and the thing. It never guesses.
-- **Out of range is refused at the SiLA edge; the device ignores it anyway.** `SetLevel(250)`, `SetValue(7)` on `step`,
+- **Out of range is refused at the SiLA edge; the device is the backstop.** `SetLevel(250)`, `SetValue(7)` on `step`,
   `SetValue('max')` on `mode`, a 17-character or non-ASCII text, `Duty.SetValue(100.01)` or `-0.1` are validation errors
-  from the server's constraint check: no frame goes to the board. A client that bypasses SiLA and sends such a value to the board
-  is ignored by the device, which keeps the previous value and reports it.
+  from the server's constraint check: no frame goes to the board. A client that bypasses SiLA and sends such a value straight to
+  the board gets what the kind does: `lamp` (a `light`) is **clamped** to its bound (200) and its report says `clamped`; `step`,
+  `mode`, `note` and `duty` **ignore** the value, keep the previous one and report it.
 - **A numeric command in presented units is rounded, and the report is the truth.** `Duty.SetValue(12.35)` becomes the raw value
   124 (the client's decimal, times 10 / 1, to the nearest integer, halves away from zero) and `Duty.Value` then reads 12.4: the value
   the device holds. Enumerated fields (`step`, `mode`) are not rounded: anything not in the set is refused.
