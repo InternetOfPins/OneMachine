@@ -8,7 +8,7 @@ them without knowing OneMachine, the pins or the board.
 properties you read or subscribe to, and commands you call, each with typed, constrained parameters) over gRPC, and every
 feature carries an XML definition (FDL) a client can fetch. The gateway (`gateway.py`) reads the machine's description over the
 serial link, writes one feature per role and serves them. It knows only the kinds in its table: a role of any other kind is
-refused, naming the kind.
+refused, naming the kind. The same machine is also served to AI assistants over MCP by [`examples/mcp`](../mcp).
 
 ## Wiring
 
