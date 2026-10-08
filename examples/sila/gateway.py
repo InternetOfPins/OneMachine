@@ -6,7 +6,9 @@
     python3 gateway.py ... --generate            write the feature definitions to --fdl-dir (default ./fdl) and stop
 
 What it knows about role kinds is one table, KINDS: a kind -> the SiLA words for it. A role of any other kind is refused, naming the kind; so is a
-tuned role (tuning is not in the table). The feature definitions (FDL) are generated at start, from the description (role names, field types, params) and the table:
+tuned role (tuning is not in the table). What a kind says about a role (the fields it reports and commands, its bounds, values, labels, scale, unit) is read
+through python/onemachine (role_facts), the same for every consumer. The feature definitions (FDL) are generated at start, from the description (role names,
+field types, params) and the table:
 
     switch   Feature <Role>   Property On     Boolean, observable   <- the report's `on`
                               Command  SetOn(On: Boolean)                   -> the command's `on`
@@ -22,7 +24,7 @@ tuned role (tuning is not in the table). The feature definitions (FDL) are gener
                               Command  SetText(Text: String, the same constraints) -> the command's u8[N]: the ASCII bytes, NUL-padded to N
     scaled   Feature <Role>   Property Value  Real, observable, Unit  <- the report's `raw`, presented = raw * num / den (the role's `scale` line)
                               Command  SetValue(Value: Real in [0, max*num/den], Unit)  -> the command's `raw`: the nearest integer to value*den/num,
-                              halves away from zero, computed from the shortest decimal of the client's double with integer arithmetic (to_raw);
+                              halves away from zero, computed from the shortest decimal of the client's double with integer arithmetic (Facts.to_raw in python/onemachine);
                               the report is what the device holds, so the actual value shows. max is the role's `param <role> max`.
     action   Feature <Role>   Property Fired  Integer, observable   <- the report's `fired` (how many times the action ran since boot)
                               Command  Fire()                               -> the command's `fire` is 1 for that one frame, 0 in every other
@@ -43,7 +45,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ONEMACHINE_PY = os.environ.get('ONEMACHINE_PY') or os.path.join(HERE, '..', '..', 'python')
 if not os.path.isdir(os.path.join(ONEMACHINE_PY, 'onemachine')): sys.exit('gateway: python/onemachine not found at %s: run from a OneMachine checkout or set ONEMACHINE_PY' % ONEMACHINE_PY)
 sys.path.insert(0, ONEMACHINE_PY)
-from onemachine import Machine, StreamLink, SchemaError, LinkError
+from onemachine import Machine, StreamLink, SchemaError, LinkError, KindError, role_facts
 
 ORIGINATOR = 'io.github.internetofpins'            # in every fully qualified feature identifier
 SERVER_TYPE, SERVER_NAME = 'OneMachineGateway', 'OneMachine SiLA example'
@@ -53,35 +55,27 @@ NS = 'http://www.sila-standard.org'
 class Refused(ValueError):
     """The machine has something this gateway has no SiLA words for; it does not guess."""
 
-# the whole of what this gateway knows about role kinds. kind -> the SiLA words, the description's field names, and (a light) which param bounds the field
+# the whole of what this gateway knows about role kinds: kind -> the SiLA words (the type it makes, the property, the command and its parameter). The description's field
+# names and the bounds come from python/onemachine's facts for the kind.
 KINDS = {
-    'switch': dict(type='bool', report='on',    command='on',    prop='On',    cmd='SetOn',    param='On'),
-    'light':  dict(type='int',  report='level', command='level', prop='Level', cmd='SetLevel', param='Level', upper='max', lower=0),
-    'discrete': dict(type='discrete', report='value', command='value', prop='Value', cmd='SetValue', param='Value', lines=('value',)),      # the allowed values: the `value` lines
-    'select': dict(type='select', report='index', command='index', prop='Value', cmd='SetValue', param='Value', lines=('value',)),         # the `value` lines, each with a label
-    'analog': dict(type='analog', report='raw', command=None, prop=None, cmd=None, lines=('scale', 'unit')),                               # report only; the property's name is the unit's
-    'text': dict(type='text', report='text', command='text', prop='Text', cmd='SetText', param='Text', lines=()),                          # a u8[N] field: printable ASCII, NUL-padded
-    'scaled': dict(type='scaled', report='raw', command='raw', prop='Value', cmd='SetValue', param='Value', upper='max', lines=('scale', 'unit')),   # a raw u16 0..max presented as raw*num/den
-    'action': dict(type='action', report='fired', command='fire', prop='Fired', cmd='Fire'),
+    'switch': dict(type='bool',     prop='On',    cmd='SetOn',    param='On'),
+    'light':  dict(type='int',      prop='Level', cmd='SetLevel', param='Level'),
+    'discrete': dict(type='discrete', prop='Value', cmd='SetValue', param='Value'),
+    'select': dict(type='select',   prop='Value', cmd='SetValue', param='Value'),
+    'analog': dict(type='analog',   prop=None,    cmd=None,       param=None),                  # report only; the property's name is the unit's
+    'text':   dict(type='text',     prop='Text',  cmd='SetText',  param='Text'),
+    'scaled': dict(type='scaled',   prop='Value', cmd='SetValue', param='Value'),
+    'action': dict(type='action',   prop='Fired', cmd='Fire'),
 }
 # unit symbol -> the SiLA Unit constraint (SI base components; factor and offset to the SI unit) and the name of the property that carries it. Only V.
 UNITS = {'%': dict(prop='Percent', label='%', factor='0.01', offset=0, components=(('Dimensionless', 1),)),
          'V': dict(prop='Voltage', label='V', factor=1, offset=0, components=(('Kilogram', 1), ('Meter', 2), ('Second', -3), ('Ampere', -1)))}
 TEXT_PATTERN = '[ -~]*'                                        # printable ASCII, 0x20..0x7e: what the device keeps (a byte buffer) and a person can read
 
-def to_raw(value, num, den):
-    """presented -> raw, presented = raw * num / den: the exact rational of the shortest decimal that round-trips the client's double (12.35, not its binary
-    neighbour 12.3499999...), times den/num, to the nearest integer, halves away from zero. Integer arithmetic only: no round(), no float multiply."""
-    x = Fraction(Decimal(repr(float(value)))) * den / num
-    p, q = abs(x.numerator), x.denominator
-    r = (2 * p + q) // (2 * q)
-    return -r if x < 0 else r
-
 def decimal_str(x):
     """a Fraction as an exact finite decimal string, or None (the SiLA constraint is text: it must say exactly what the bound is)"""
     d = Decimal(x.numerator) / Decimal(x.denominator)
     return format(d.normalize(), 'f') if Fraction(d) == x else None
-INT_RANGE = {'u8': (0, 255), 'u16': (0, 65535), 'u32': (0, 2**32 - 1), 'i8': (-128, 127), 'i16': (-32768, 32767), 'i32': (-2**31, 2**31 - 1)}
 
 def camel(name):
     if not re.fullmatch(r'[A-Za-z0-9_]+', name) or '' in name.split('_'): raise Refused('role name %r has no SiLA identifier' % name)
@@ -90,77 +84,29 @@ def camel(name):
     return ident
 
 def model(m):
-    """[(role name, feature identifier, kind, row, bounds)] for every role of the machine, or Refused. bounds = (low, high) of the command field, or None."""
+    """[(role name, feature identifier, kind, row, bounds)] for every role of the machine, or Refused. bounds = what the kind bounds the command with, in the shape fdl() reads."""
     out, seen = [], {'SiLAService': 'the library'}
-    LINES = ('value', 'scale', 'unit')
     for name, info in m.roles.items():
         if info.kind not in KINDS: raise Refused('role %s is of kind %r; this gateway knows %s' % (name, info.kind, ', '.join(sorted(KINDS))))
         if info.tuned: raise Refused('role %s (%s) is tuned: tuning is not in this gateway\'s table' % (name, info.kind))
-        k = dict(KINDS[info.kind])
-        have = {'value': info.values, 'scale': info.scales, 'unit': info.units}
-        for line in LINES:
-            if have[line] and line not in k.get('lines', ()): raise Refused('role %s (%s): its description has %s lines, which the %s row does not use' % (name, info.kind, line, info.kind))
-        fields = {}
-        for what, schema, field in (('command', m.command_schema, k['command']), ('report', m.report_schema, k['report'])):
-            if field is None: continue
-            layer = schema.layer(name)
-            f = next((f for f in layer.fields if f.name == field), None) if layer else None
-            if k['type'] == 'text':
-                if f is None or not f.n or f.base != 'u8': raise Refused('role %s (%s): its %s has no u8 array %r' % (name, info.kind, what, field))
-                fields[what] = f; continue
-            if f is None or f.n: raise Refused('role %s (%s): its %s has no scalar %r' % (name, info.kind, what, field))
-            if k['type'] == 'bool' and f.base != 'bool': raise Refused('role %s (%s): its %s %r is %s, not bool' % (name, info.kind, what, field, f.base))
-            if k['type'] != 'bool' and f.base not in INT_RANGE: raise Refused('role %s (%s): its %s %r is %s, which is no SiLA Integer' % (name, info.kind, what, field, f.base))
-            fields[what] = f
-        bounds = None
-        if k['type'] == 'int':
-            if k['upper'] not in info.params: raise Refused('role %s (%s): no param %r in its description, and the table says it bounds %r' % (name, info.kind, k['upper'], k['command']))
-            lo, hi = k['lower'], info.params[k['upper']]
-            tlo, thi = INT_RANGE[fields['command'].base]
-            if not (tlo <= lo <= hi <= thi): raise Refused('role %s (%s): bound [%d, %d] does not fit the %s field %r' % (name, info.kind, lo, hi, fields['command'].base, k['command']))
-            bounds = (lo, hi)
-        elif k['type'] == 'discrete':
-            if not info.values: raise Refused('role %s (%s): no allowed values in its description (`value` lines)' % (name, info.kind))
-            if any(label is not None for _, label in info.values): raise Refused('role %s (%s): a value has a label, which the discrete row does not use' % (name, info.kind))
-            vals = [v for v, _ in info.values]
-            tlo, thi = INT_RANGE[fields['command'].base]
-            if len(set(vals)) != len(vals) or not all(tlo <= v <= thi for v in vals): raise Refused('role %s (%s): values %s are not distinct values of the %s field %r' % (name, info.kind, vals, fields['command'].base, k['command']))
-            bounds = tuple(vals)
-        elif k['type'] == 'select':
-            if not info.values: raise Refused('role %s (%s): no values in its description (`value` lines)' % (name, info.kind))
-            unlabelled = [v for v, label in info.values if label is None]
-            if unlabelled: raise Refused('role %s (%s): value %s has no label' % (name, info.kind, unlabelled[0]))
-            vals, labels = [v for v, _ in info.values], [label for _, label in info.values]
-            tlo, thi = INT_RANGE[fields['command'].base]
-            if len(set(vals)) != len(vals) or not all(tlo <= v <= thi for v in vals): raise Refused('role %s (%s): values %s are not distinct values of the %s field %r' % (name, info.kind, vals, fields['command'].base, k['command']))
-            if len(set(labels)) != len(labels): raise Refused('role %s (%s): two values have the same label (%s)' % (name, info.kind, ', '.join(labels)))
-            bounds = tuple(info.values)
-        elif k['type'] == 'analog':
-            if set(info.scales) != {k['report']}: raise Refused('role %s (%s): the description needs one `scale` line, for the field %r (it has %s)' % (name, info.kind, k['report'], sorted(info.scales) or 'none'))
-            if set(info.units) != {k['report']}: raise Refused('role %s (%s): the description needs one `unit` line, for the field %r (it has %s)' % (name, info.kind, k['report'], sorted(info.units) or 'none'))
-            symbol = info.units[k['report']]
-            if symbol not in UNITS: raise Refused('role %s (%s): unit symbol %r is not in this gateway\'s unit table (%s)' % (name, info.kind, symbol, ', '.join(sorted(UNITS))))
-            num, den = info.scales[k['report']]
-            k['prop'] = UNITS[symbol]['prop']
-            bounds = (num, den, symbol)
-        elif k['type'] == 'text':
-            if fields['command'].n != fields['report'].n: raise Refused('role %s (%s): its command buffer is %d bytes and its report %d' % (name, info.kind, fields['command'].n, fields['report'].n))
-            bounds = (fields['command'].n,)
-        elif k['type'] == 'scaled':
-            if set(info.scales) != {k['report']}: raise Refused('role %s (%s): the description needs one `scale` line, for the field %r (it has %s)' % (name, info.kind, k['report'], sorted(info.scales) or 'none'))
-            if set(info.units) != {k['report']}: raise Refused('role %s (%s): the description needs one `unit` line, for the field %r (it has %s)' % (name, info.kind, k['report'], sorted(info.units) or 'none'))
-            symbol = info.units[k['report']]
-            if symbol not in UNITS: raise Refused('role %s (%s): unit symbol %r is not in this gateway\'s unit table (%s)' % (name, info.kind, symbol, ', '.join(sorted(UNITS))))
-            if k['upper'] not in info.params: raise Refused('role %s (%s): no param %r in its description, and the table says it bounds %r' % (name, info.kind, k['upper'], k['command']))
-            num, den = info.scales[k['report']]
-            if num <= 0 or den <= 0: raise Refused('role %s (%s): scale %d/%d is not positive' % (name, info.kind, num, den))
-            hi_raw = info.params[k['upper']]; tlo, thi = INT_RANGE[fields['command'].base]
-            if not (0 <= hi_raw <= thi): raise Refused('role %s (%s): bound [0, %d] does not fit the %s field %r' % (name, info.kind, hi_raw, fields['command'].base, k['command']))
-            lo_s, hi_s = decimal_str(Fraction(0)), decimal_str(Fraction(hi_raw * num, den))
-            if hi_s is None: raise Refused('role %s (%s): the presented bound %d*%d/%d is not a finite decimal' % (name, info.kind, hi_raw, num, den))
-            bounds = (num, den, symbol, hi_raw, lo_s, hi_s)
-        elif k['type'] == 'action':
-            if INT_RANGE[fields['command'].base][0] != 0: raise Refused('role %s (%s): its command %r (%s) is signed; the flag is 0 or 1 of an unsigned field' % (name, info.kind, k['command'], fields['command'].base))
+        try: f = role_facts(m, name)
+        except KindError as e: raise Refused(str(e))
+        k = dict(KINDS[info.kind], report=f.report, command=f.command, facts=f)
+        t, bounds = k['type'], None
+        if t == 'int': bounds = (f.low, f.high)
+        elif t == 'discrete': bounds = f.values
+        elif t == 'select': bounds = tuple(zip(f.values, f.labels))
+        elif t in ('analog', 'scaled'):
+            if f.unit not in UNITS: raise Refused('role %s (%s): unit symbol %r is not in this gateway\'s unit table (%s)' % (name, info.kind, f.unit, ', '.join(sorted(UNITS))))
+            num, den = f.scale
+            if t == 'analog':
+                k['prop'] = UNITS[f.unit]['prop']
+                bounds = (num, den, f.unit)
+            else:
+                lo_s, hi_s = decimal_str(Fraction(0)), decimal_str(f.presented(f.high))
+                if hi_s is None: raise Refused('role %s (%s): the presented bound %d*%d/%d is not a finite decimal' % (name, info.kind, f.high, num, den))
+                bounds = (num, den, f.unit, f.high, lo_s, hi_s)
+        elif t == 'text': bounds = (f.size,)
         ident = camel(name)
         if ident in seen: raise Refused('roles %r and %r are both the feature %s' % (seen[ident], name, ident))
         seen[ident] = name
@@ -255,15 +201,12 @@ def serve(a, m, models, paths):
         setattr(impl, '_%s_producer_queue' % k['prop'], Queue())
         setattr(impl, 'update_' + k['prop'], (lambda v, impl=impl, p=k['prop']: (setattr(impl, '_%s_current_value' % p, v), getattr(impl, '_%s_producer_queue' % p).put(v))))
         setattr(impl, k['prop'] + '_on_subscription', lambda *, metadata: None)
-        raw_of = {label: raw for raw, label in bounds} if k['type'] == 'select' else None
-        def setter(value, *, metadata, name=name, k=k, raw_of=raw_of, bounds=bounds):
+        def setter(value, *, metadata, name=name, k=k):
+            f = k['facts']
             with lock:                                                # one frame at a time: a frame carries every role's command
-                if k['type'] == 'text':
-                    b = value.encode('ascii')                                 # the SiLA edge (Pattern, MaximalLength) has already refused anything else; this is not trusted
-                    if len(b) > bounds[0] or not all(0x20 <= c <= 0x7e for c in b): raise ValueError('text outside the buffer or printable ASCII')
-                    v = list(b) + [0] * (bounds[0] - len(b))                  # NUL-padded: nothing of an older, longer text stays
-                elif k['type'] == 'scaled': v = to_raw(value, bounds[0], bounds[1])
-                else: v = bool(value) if k['type'] == 'bool' else raw_of[value] if raw_of else int(value)
+                if k['type'] == 'text': v = f.pack_text(value)                # the SiLA edge (Pattern, MaximalLength) has already refused anything else; this is not trusted
+                elif k['type'] == 'scaled': v = f.to_raw(value)
+                else: v = bool(value) if k['type'] == 'bool' else f.raw_of(value) if k['type'] == 'select' else int(value)
                 setattr(getattr(m.cmd, name), k['command'], v)
                 m.push()                                              # once
         def fire(*, metadata, name=name, k=k):
@@ -281,13 +224,9 @@ def serve(a, m, models, paths):
         for name, ident, kind, k, bounds in models:
             v = getattr(getattr(r, name), k['report'])
             if k['type'] == 'bool': v = bool(v)
-            elif k['type'] == 'select':
-                label = dict(bounds).get(int(v))
-                if label is None: raise LinkError('role %s: the report says %d, which no `value` line names' % (name, v))
-                v = label
-            elif k['type'] == 'analog': v = float(v) * bounds[0] / bounds[1]
-            elif k['type'] == 'scaled': v = float(Fraction(int(v) * bounds[0], bounds[1]))
-            elif k['type'] == 'text': v = bytes(v).split(b'\0', 1)[0].decode('ascii', 'replace')
+            elif k['type'] == 'select': v = k['facts'].label_of(v)
+            elif k['type'] in ('analog', 'scaled'): v = float(k['facts'].presented(v))
+            elif k['type'] == 'text': v = k['facts'].unpack_text(v)
             else: v = int(v)
             if impls[name].last != v: impls[name].last = v; getattr(impls[name], 'update_' + k['prop'])(v)
     publish()
