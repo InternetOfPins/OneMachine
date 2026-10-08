@@ -32,6 +32,15 @@ for cxx in g++ clang++; do have $cxx || continue
   done
 done
 
+echo "== description lines a kind may print: value, scale, unit (values_check: g++ and clang++ with sanitizers; values_check.py reads the text)"
+for cxx in g++ clang++; do have $cxx || continue
+  if ! $cxx -std=c++17 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-sanitize-recover=all "${F[@]}" values_check.cpp -o "$W/vc" 2>"$W/err"; then bad "values_check [$cxx]" "does not build: $(grep -m1 error "$W/err")"; continue; fi
+  o=$("$W/vc" "$W/vdesc.txt" 2>&1); [ $? -eq 0 ] && ok "values_check [$cxx]: $(printf '%s' "$o" | tail -1)" || bad "values_check [$cxx]" "$(printf '%s' "$o" | grep FAIL | head -3)"
+done
+if have python3 && [ -f "$W/vdesc.txt" ]; then
+  o=$(python3 values_check.py "$W/vdesc.txt" 2>&1); [ $? -eq 0 ] && ok "values_check.py: $(printf '%s' "$o" | grep -c '^  ok') checks" || bad "values_check.py" "$(printf '%s' "$o" | grep FAIL | head -3)"
+fi
+
 echo "== rules, each with its own message"
 rej() { local n=$1 d=$2 m=$3
   for cxx in "g++ -std=c++17" "clang++ -std=c++17" "avr-g++ -std=gnu++17 -mmcu=atmega328p"; do have ${cxx%% *} || continue

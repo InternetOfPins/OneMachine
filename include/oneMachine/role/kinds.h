@@ -2,7 +2,8 @@
 // oneMachine/role/kinds.h -- the kinds of output a role can be. A kind gives:
 //   name()                        its word in the machine description ("light")
 //   Command, Report               state slots (fixed-width fields, one `each`); the report's `live` is added by role::Machine
-//   params(v)                     v(name, int32 value) per parameter: its units and limits, in the machine description
+//   params(v)                     v(name, int32 value) per parameter: its units and limits, in the machine description; a kind may also
+//                                 call v.value(raw[, label]), v.scale(field, num, den), v.unit(field, symbol) (role/face.h)
 //   apply<E>(cmd, rep)            write the command to endpoint E, read back what E actually does
 //   sense<E>(rep)                 read back only
 //   safe(cmd, rep)                the command that makes the output harmless (a per-role choice where there is one, as a parameter)

@@ -7,6 +7,9 @@
 //   ref https://...                 role/ref.h, in item order
 //   role x axis                     one per role: name, kind
 //   param x steps_mm 80             one per kind parameter, signed decimal: the firmware's value (for a tuned role, its limit)
+//   value x 50 half                 a kind may print: a value the role takes, with an optional label (v.value(raw, label))
+//   scale x level 5 1023            presented = raw * num / den, for a field of the role (v.scale(field, num, den))
+//   unit x level V                  the unit symbol of a field of the role (v.unit(field, symbol))
 //   tune x                          the role is role::Tuned: its parameters' current values are the link's tuning state (ops T, G, S)
 //   at x sim.stepdir(0)             where the device routes it: for a person reading the description, not for a consumer.
 //                                   Not in the hash: rewiring changes nothing a consumer depends on.
@@ -30,6 +33,17 @@ namespace role {
     P& put; state::Name role;
     void operator()(state::Name n, int32_t v) {
       ONEMACHINE_ROLE_TEXT(kParam, "param "); ONEMACHINE_ROLE_PUT(put, kParam); state::put_name(put, role); put(' '); state::put_name(put, n); put(' '); put_int(put, v); put('\n'); }
+    // a value the role takes, with an optional label: presented to a person or a consumer as the label
+    void value(int32_t raw) {
+      ONEMACHINE_ROLE_TEXT(kValue, "value "); ONEMACHINE_ROLE_PUT(put, kValue); state::put_name(put, role); put(' '); put_int(put, raw); put('\n'); }
+    void value(int32_t raw, state::Name label) {
+      ONEMACHINE_ROLE_TEXT(kValue, "value "); ONEMACHINE_ROLE_PUT(put, kValue); state::put_name(put, role); put(' '); put_int(put, raw); put(' '); state::put_name(put, label); put('\n'); }
+    // presented = raw * num / den, for a field of the role
+    void scale(state::Name field, int32_t num, int32_t den) {
+      ONEMACHINE_ROLE_TEXT(kScale, "scale "); ONEMACHINE_ROLE_PUT(put, kScale); state::put_name(put, role); put(' '); state::put_name(put, field); put(' '); put_int(put, num); put(' '); put_int(put, den); put('\n'); }
+    // the unit symbol of a field of the role
+    void unit(state::Name field, state::Name symbol) {
+      ONEMACHINE_ROLE_TEXT(kUnit, "unit "); ONEMACHINE_ROLE_PUT(put, kUnit); state::put_name(put, role); put(' '); state::put_name(put, field); put(' '); state::put_name(put, symbol); put('\n'); }
   };
   template<class P> struct Lines {
     P& put; bool at;
