@@ -10,8 +10,9 @@ kinds into a SiLA 2 server.
 
 ## What the machine provides
 
-Nothing consumer-specific. The firmware is built with the link (`role::Link`) and its roles' kinds; it carries no protocol
-library, no protocol vocabulary and no generated files. A consumer gets two things over the link:
+Nothing consumer-specific, when the consumer is on the other side of the link. The firmware is built with the link
+(`role::Link`) and its roles' kinds; it carries no protocol library, no protocol vocabulary and no generated files. A consumer
+gets two things over the link:
 
 - **The description**, read once at connect (`m`, `c`, `r`): roles, kinds, parameters, field names and types, and the lines a
   kind prints about its values (`value`, `scale`, `unit`; see [role.md](role.md#the-consumers-contract)).
@@ -39,8 +40,9 @@ These hold for any consumer; the SiLA gateway is how each looks in practice.
    a meaning, and never serves part of a machine silently.
 
 4. **A binding exposes only what its protocol can represent.** A protocol constraint that a client reads once at connect (a
-   SiLA minimum or maximum, an allowed set) is generated only from values fixed in the firmware. A value that can change at run
-   time is a readable value, never a constraint.
+   SiLA minimum or maximum, an allowed set) is generated only from values fixed in the firmware. A value that can change at
+   run time is a readable value, never a constraint. `examples/sila` meets it by refusing tuned roles: their run-time values
+   are not served yet.
 
 5. **Validation at the consumer's edge; the device is the backstop.** Values outside a constraint are refused by the consumer
    with the protocol's own error, and nothing reaches the device. A value that reaches the device anyway (a client bypassing
