@@ -225,6 +225,11 @@ And one on the output side, needing only a Nano:
 - [`examples/python`](examples/python) — outputs driven by role name from Python over USB serial, or on the host with the
   pins simulated: the consumer side of `role::`.
 
+And one that serves a machine to lab software:
+
+- [`examples/sila`](examples/sila) — one field of each kind (switch, level, discrete, select, analog volts, text, command in presented
+  units, action) served as SiLA 2 features by a Python gateway, from a Nano or on the host with the endpoints simulated.
+
 And one on a second bus:
 
 - [`examples/spi`](examples/spi) — an RC522 RFID reader found on an SPI bus with statically declared chip selects
