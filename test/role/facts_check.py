@@ -94,6 +94,28 @@ refused('a scaled with no `max` param', lambda ls: drop(ls, 'param duty max 1000
 refused('a scaled whose max does not fit its field', lambda ls: sub(ls, 'param duty max 1000', 'param duty max 70000'), 'duty', '70000')
 check('the machine as it is is accepted by every refusal harness', all(role_facts(Machine(Fake(rehash(list(lines)))), n) for n in m.roles))
 
+# ---- a value exactly at the presented bound of a scaled role is within it, and a float compared as its binary value is not: 1.1 as a double is above 11/10
+import importlib.util, math
+spec = importlib.util.spec_from_file_location('mcp_server', os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../examples/mcp/server.py'))
+srv = importlib.util.module_from_spec(spec); spec.loader.exec_module(srv)           # examples/mcp's server: the consumer that compares a value with the bound
+def edited(edit):
+    ls = list(lines); edit(ls); return Machine(Fake(rehash(ls)))
+for max_raw, bound, binary in ((11, '1.1', 'above'), (4, '0.4', 'above'), (9, '0.9', 'above'), (3, '0.3', 'below')):            # duty's scale is 1/10: the bound is max/10
+    mm = edited(lambda ls: sub(ls, 'param duty max 1000', 'param duty max %d' % max_raw))
+    f, x = role_facts(mm, 'duty'), float(bound)
+    top = Fraction(max_raw, 10)
+    check('bound %s: presented(high) is exactly %s' % (bound, top), f.presented(f.high) == top)
+    check('bound %s: the double %r is %s the bound in binary (%s)' % (bound, x, binary, 'the comparison that must not be used' if binary == 'above' else 'a control: both comparisons agree'),
+          (Fraction(x) > top) == (binary == 'above') and (Fraction(x) < top) == (binary == 'below'))
+    check('bound %s: written(%r) is the bound, so the value is within it' % (bound, x), f.written(x) == top and f.written(x) <= f.presented(f.high))
+    up = math.nextafter(x, 10)
+    check('bound %s: the next double above (%r) is above the bound' % (bound, up), f.written(up) > f.presented(f.high))
+    role = {r.name: r for r in srv.model(mm)}['duty']
+    raw, err = role.refuse({'value': x})
+    check('examples/mcp, bound %s: duty_set %r is accepted, raw %d' % (bound, x, max_raw), err is None and raw == max_raw, (raw, err))
+    raw, err = role.refuse({'value': up})
+    check('examples/mcp, bound %s: duty_set %r is refused naming the maximum' % (bound, up), raw is None and 'above the maximum %s' % bound in err, (raw, err))
+
 # ---- the field-shape refusals: stub schemas with one field changed
 class S:
     def __init__(self, **layers): self.l = layers

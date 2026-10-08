@@ -262,10 +262,14 @@ class Facts:
     def presented(self, raw):
         """raw -> the presented value, exactly (a Fraction): raw * num / den"""
         return Fraction(int(raw) * self.scale[0], self.scale[1])
+    def written(self, value):
+        """a number as the client wrote it, exactly (a Fraction): the shortest decimal that round-trips the double, so 1.1 is 11/10 and not the double's
+        binary value 1.100000000000000088...; a value is compared with a presented bound (presented(high)) through this, never as a float"""
+        return Fraction(Decimal(repr(float(value))))
     def to_raw(self, value):
-        """presented -> raw: the exact rational of the shortest decimal that round-trips the client's number, times den / num, to the nearest integer,
-        halves away from zero. Integer arithmetic only: no round(), no float multiply."""
-        x = Fraction(Decimal(repr(float(value)))) * self.scale[1] / self.scale[0]
+        """presented -> raw: the number as written, times den / num, to the nearest integer, halves away from zero. Integer arithmetic only: no round(),
+        no float multiply."""
+        x = self.written(value) * self.scale[1] / self.scale[0]
         p, q = abs(x.numerator), x.denominator
         r = (2 * p + q) // (2 * q)
         return -r if x < 0 else r
