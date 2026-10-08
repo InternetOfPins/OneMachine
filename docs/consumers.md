@@ -6,7 +6,8 @@ industrial controller. The machine is built once and knows none of them; each co
 whose roles it understands.
 
 [`examples/sila`](../examples/sila) is the worked example: a Python gateway that turns any machine built from its eight role
-kinds into a SiLA 2 server.
+kinds into a SiLA 2 server. [`examples/mcp`](../examples/mcp) serves the same machine to AI assistants over MCP: the same
+description, another protocol's words.
 
 ## What the machine provides
 
@@ -29,7 +30,10 @@ These hold for any consumer; the SiLA gateway is how each looks in practice.
 1. **One table: kind to the protocol's words.** The consumer's knowledge of machines is a table with one row per role kind. A
    row is about a kind, never about a machine: "a `light`'s `level` is bounded by its `max` parameter", not "the lamp goes to
    200". Everything machine-specific (role names, limits, allowed values, labels, scales, units, text lengths) is read from the
-   description at connect. In `examples/sila` the table is `KINDS` in `gateway.py`.
+   description at connect. What a kind says about a role (the fields it reports and commands, what bounds them, the values,
+   labels, scale and unit, how a raw integer is presented) is read through `python/onemachine` (`role_facts`), the same for
+   every consumer; the table holds only the protocol's words. In `examples/sila` the table is `KINDS` in `gateway.py`, in
+   `examples/mcp` it is `KINDS` in `server.py`.
 
 2. **The protocol's self-description is generated, never written by hand.** The SiLA gateway writes each feature definition
    (FDL) from the description at start. Change a limit or a label in the firmware and, after a reconnect, the consumer serves
@@ -70,7 +74,8 @@ place instead of carrying its own copy.
 
 ## Adding a consumer
 
-1. Map each kind you need to the protocol's words: type, constraints, unit, readable or commandable. Write it as the table.
+1. Map each kind you need to the protocol's words: type, constraints, unit, readable or commandable. Write it as the table,
+   and read the kind's facts from `role_facts` in `python/onemachine` instead of copying them.
 2. Generate the protocol's self-description from the machine description; check it against the protocol's own schema where one
    exists (SiLA: the FDL schema from `sila_base`).
 3. Refuse everything outside the table, by name.
