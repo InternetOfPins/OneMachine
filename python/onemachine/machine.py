@@ -96,7 +96,7 @@ class RoleInfo:
     def __repr__(self): return 'Role(%s %s %r%s)' % (self.name, self.kind, self.params, ' tuned' if self.tuned else '')
 
 LABEL = re.compile(r'[A-Za-z0-9_-]{1,32}')          # a value's label: no space, no quote, no markup; the line is split on spaces
-SYMBOL = re.compile(r'[A-Za-z0-9/*^.-]{1,16}')
+SYMBOL = re.compile(r'[A-Za-z0-9/*^.%-]{1,16}')
 
 class Description:
     """The machine description (role/face.h): refs, roles with kind and parameters, and where each is (for people only)."""

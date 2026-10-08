@@ -85,7 +85,7 @@ unit vin raw V              the unit symbol of a field of the role (v.unit(field
 ```
 
 The device holds integers only; the presented value is the consumer's arithmetic. A label is 1 to 32 of `A-Z a-z 0-9 _ -`
-(`python/onemachine` refuses the description otherwise). Kinds that print none of these lines print exactly what they did before.
+(`python/onemachine` refuses the description otherwise). A unit symbol is one token of `A-Z a-z 0-9 / * ^ . % -`, 1 to 16 characters (the same refusal). Kinds that print none of these lines print exactly what they did before.
 
 So rewiring, a device moving to another channel, or new firmware with the same roles changes nothing on the consumer side: the
 same command frame is accepted as is (`test/role/check.py`, "rewired firmware"). When the roles do change, the device answers

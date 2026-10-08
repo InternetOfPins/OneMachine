@@ -33,6 +33,13 @@ refused(base + ['value mode 1 ' + 'x' * 33], 'a label of 33 characters')
 refused(base + ['value nobody 1 x'], 'a value line for a role not declared above it')
 refused(base + ['scale mode index 1 0'], 'a scale with denominator 0')
 refused(base + ['frobnicate mode 1'], 'an unknown line type')
+def accepted(body, what):
+    try: d = Description(rehash(body)); check('accepted: %s' % what, True); return d
+    except SchemaError as e: check('accepted: %s -> %s' % (what, e), False)
+d2 = accepted(base + ['unit mode index %', 'unit mode index2 V/s^2'], 'unit symbols % and V/s^2')
+check('the symbol is kept as written', d2 is not None and d2.roles['mode'].units == {'index': '%', 'index2': 'V/s^2'})
+refused(base + ['unit mode index V"'], 'a unit symbol with a quote')
+refused(base + ['unit mode index ' + 'V' * 17], 'a unit symbol of 17 characters')
 try: Description(open(sys.argv[1]).read().replace('value mode 7 high', 'value mode 7 higher')); check('changed label with the old hash is refused', False)
 except SchemaError as e: check('changed label with the old hash is refused -> %s' % e, 'hash' in str(e))
 print('FAILED' if fails else 'ok'); sys.exit(1 if fails else 0)
