@@ -229,6 +229,7 @@ And one that serves a machine to lab software:
 
 - [`examples/sila`](examples/sila) — one field of each kind (switch, level, discrete, select, analog volts, text, command in presented
   units, action) served as SiLA 2 features by a Python gateway, from a Nano or on the host with the endpoints simulated.
+  The rules any such consumer follows are in [`docs/consumers.md`](docs/consumers.md).
 
 And one on a second bus:
 

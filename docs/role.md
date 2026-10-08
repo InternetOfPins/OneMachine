@@ -66,6 +66,8 @@ state descriptions. The command and report hashes cover the role names and the k
 kinds, parameters and references. The `at` lines (where each role is) are shown to people and are in no hash. The start of
 the test machine's description (`test/role/machine.h`):
 
+A consumer that presents a machine in another protocol (SiLA 2, for one) is described in [consumers.md](consumers.md).
+
 ```
 machine 1
 hash a9c67c1d
