@@ -27,7 +27,6 @@ read once (m.poll()): the link is request/response and the device applies a comm
 the device's state after that command. Nothing is held or resent. Needs mcp and pyserial (requirements.txt) and python/onemachine from this checkout
 (ONEMACHINE_PY=<dir> to use another)."""
 import argparse, json, os, re, sys, threading, time
-from decimal import Decimal
 from fractions import Fraction
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -125,7 +124,7 @@ class Role:
                 if v > f.high: return None, '%s: %d is above the maximum %d' % (p, v, f.high)
             return v, None
         hi = self.top()                                                               # scaled: the bounds are on the presented value, as in the schema
-        x = Fraction(Decimal(repr(float(v))))                                         # the number as the client wrote it (12.35, not its binary neighbour)
+        x = f.written(v)                                                              # the number as the client wrote it (1.1, not its binary neighbour)
         if x < 0: return None, '%s: %r is below the minimum 0' % (p, v)
         if x > hi: return None, '%s: %r is above the maximum %s' % (p, v, number(hi))
         return f.to_raw(v), None

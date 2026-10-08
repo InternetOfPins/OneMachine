@@ -262,10 +262,14 @@ class Facts:
     def presented(self, raw):
         """raw -> the presented value, exactly (a Fraction): raw * num / den"""
         return Fraction(int(raw) * self.scale[0], self.scale[1])
+    def written(self, value):
+        """a number as the client wrote it, exactly (a Fraction): the shortest decimal that round-trips the double, so 1.1 is 11/10 and not the double's
+        binary value 1.100000000000000088...; a value is compared with a presented bound (presented(high)) through this, never as a float"""
+        return Fraction(Decimal(repr(float(value))))
     def to_raw(self, value):
-        """presented -> raw: the exact rational of the shortest decimal that round-trips the client's number, times den / num, to the nearest integer,
-        halves away from zero. Integer arithmetic only: no round(), no float multiply."""
-        x = Fraction(Decimal(repr(float(value)))) * self.scale[1] / self.scale[0]
+        """presented -> raw: the number as written, times den / num, to the nearest integer, halves away from zero. Integer arithmetic only: no round(),
+        no float multiply."""
+        x = self.written(value) * self.scale[1] / self.scale[0]
         p, q = abs(x.numerator), x.denominator
         r = (2 * p + q) // (2 * q)
         return -r if x < 0 else r
@@ -287,7 +291,7 @@ class Facts:
 
 def role_facts(m, name):
     """The Facts of role `name` of Machine m, or KindError. Checks the description against the kind: only the lines the kind prints, the fields it reports and
-    commands present with the types it needs, the bound param, distinct values, unique labels, a positive scale for a scaled value, a flag that is unsigned."""
+    commands present with the types it needs, the bound param, distinct values, unique labels, a positive scale, a flag that is unsigned."""
     info = m.roles[name]
     if info.kind not in KINDS: raise KindError('role %s is of kind %r; python/onemachine has facts for %s' % (name, info.kind, ', '.join(sorted(KINDS))))
     k, f = KINDS[info.kind], Facts(name, info.kind)
@@ -331,9 +335,9 @@ def role_facts(m, name):
         for line, d in (('scale', info.scales), ('unit', info.units)):
             if set(d) != {k.report}: refuse('the description needs one `%s` line, for the field %r (it has %s)' % (line, k.report, sorted(d) or 'none'))
         f.scale, f.unit = info.scales[k.report], info.units[k.report]
+        if f.scale[0] <= 0 or f.scale[1] <= 0: refuse('scale %d/%d is not positive' % f.scale)
         if info.kind == 'scaled':
             if k.upper not in info.params: refuse('no param %r in its description, and the %s kind says it bounds %r' % (k.upper, info.kind, k.command))
-            if f.scale[0] <= 0 or f.scale[1] <= 0: refuse('scale %d/%d is not positive' % f.scale)
             hi = info.params[k.upper]
             if not (0 <= hi <= thi): refuse('bound [0, %d] does not fit the %s field %r' % (hi, f.command_type, k.command))
             f.low, f.high = 0, hi

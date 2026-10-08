@@ -4,7 +4,7 @@ What the description of the examples/sila machine says through each of its eight
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../python'))
 from fractions import Fraction
-from onemachine import Machine, StreamLink, KindError, LinkError, role_facts, KINDS
+from onemachine import Machine, StreamLink, SchemaError, KindError, LinkError, role_facts, KINDS
 from onemachine.machine import _fnv, OK
 from onemachine.schema import Field, Layer
 
@@ -83,9 +83,38 @@ refused('a `value` line on a light', lambda ls: after(ls, 'role lamp light', 'va
 refused('an analog with no `scale` line', lambda ls: drop(ls, 'scale vin raw 5 1023'), 'vin', 'scale')
 refused('an analog whose `unit` is for another field', lambda ls: sub(ls, 'unit vin raw V', 'unit vin other V'), 'vin', 'unit')
 refused('a scaled with a scale of 0/10', lambda ls: sub(ls, 'scale duty raw 1 10', 'scale duty raw 0 10'), 'duty', 'not positive')
+refused('an analog with a scale whose numerator is 0 (0/1023)', lambda ls: sub(ls, 'scale vin raw 5 1023', 'scale vin raw 0 1023'), 'vin', 'scale 0/1023', 'not positive')
+refused('an analog with a negative numerator (-5/1023)', lambda ls: sub(ls, 'scale vin raw 5 1023', 'scale vin raw -5 1023'), 'vin', 'scale -5/1023', 'not positive')
+refused('an analog with a negative denominator (5/-1023)', lambda ls: sub(ls, 'scale vin raw 5 1023', 'scale vin raw 5 -1023'), 'vin', 'scale 5/-1023', 'not positive')
+refused('a scaled with a negative numerator (-1/10)', lambda ls: sub(ls, 'scale duty raw 1 10', 'scale duty raw -1 10'), 'duty', 'scale -1/10', 'not positive')
+refused('a scaled with a negative denominator (1/-10)', lambda ls: sub(ls, 'scale duty raw 1 10', 'scale duty raw 1 -10'), 'duty', 'scale 1/-10', 'not positive')
+try: Machine(Fake(rehash([('scale vin raw 5 0' if l == 'scale vin raw 5 1023' else l) for l in lines]))); check('refused: a scale with denominator 0, by the description itself', False)
+except SchemaError as e: check('refused: a scale with denominator 0, by the description itself -> %s' % e, 'denominator 0' in str(e))
 refused('a scaled with no `max` param', lambda ls: drop(ls, 'param duty max 1000'), 'duty', "'max'")
 refused('a scaled whose max does not fit its field', lambda ls: sub(ls, 'param duty max 1000', 'param duty max 70000'), 'duty', '70000')
 check('the machine as it is is accepted by every refusal harness', all(role_facts(Machine(Fake(rehash(list(lines)))), n) for n in m.roles))
+
+# ---- a value exactly at the presented bound of a scaled role is within it, and a float compared as its binary value is not: 1.1 as a double is above 11/10
+import importlib.util, math
+spec = importlib.util.spec_from_file_location('mcp_server', os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../examples/mcp/server.py'))
+srv = importlib.util.module_from_spec(spec); spec.loader.exec_module(srv)           # examples/mcp's server: the consumer that compares a value with the bound
+def edited(edit):
+    ls = list(lines); edit(ls); return Machine(Fake(rehash(ls)))
+for max_raw, bound, binary in ((11, '1.1', 'above'), (4, '0.4', 'above'), (9, '0.9', 'above'), (3, '0.3', 'below')):            # duty's scale is 1/10: the bound is max/10
+    mm = edited(lambda ls: sub(ls, 'param duty max 1000', 'param duty max %d' % max_raw))
+    f, x = role_facts(mm, 'duty'), float(bound)
+    top = Fraction(max_raw, 10)
+    check('bound %s: presented(high) is exactly %s' % (bound, top), f.presented(f.high) == top)
+    check('bound %s: the double %r is %s the bound in binary (%s)' % (bound, x, binary, 'the comparison that must not be used' if binary == 'above' else 'a control: both comparisons agree'),
+          (Fraction(x) > top) == (binary == 'above') and (Fraction(x) < top) == (binary == 'below'))
+    check('bound %s: written(%r) is the bound, so the value is within it' % (bound, x), f.written(x) == top and f.written(x) <= f.presented(f.high))
+    up = math.nextafter(x, 10)
+    check('bound %s: the next double above (%r) is above the bound' % (bound, up), f.written(up) > f.presented(f.high))
+    role = {r.name: r for r in srv.model(mm)}['duty']
+    raw, err = role.refuse({'value': x})
+    check('examples/mcp, bound %s: duty_set %r is accepted, raw %d' % (bound, x, max_raw), err is None and raw == max_raw, (raw, err))
+    raw, err = role.refuse({'value': up})
+    check('examples/mcp, bound %s: duty_set %r is refused naming the maximum' % (bound, up), raw is None and 'above the maximum %s' % bound in err, (raw, err))
 
 # ---- the field-shape refusals: stub schemas with one field changed
 class S:
